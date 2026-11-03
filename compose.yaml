@@ -1,0 +1,25 @@
+name: ftp
+
+services:
+  ftp:
+    build:
+      context: .
+      target: development
+    image: ftp-dev:local
+    init: true
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8090:8000"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD-SHELL", "php docker/mysql.php check && curl --fail --silent http://127.0.0.1:8000/up > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+
+volumes:
+  mysql-data:
