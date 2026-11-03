@@ -1,9 +1,10 @@
 # FTP
 
-Environnement de développement Laravel 13 : une seule image finale et un seul
-conteneur réunissent PHP 8.4, les dépendances Composer (développement inclus), les
-assets Vite compilés et le serveur **MySQL 8.4**. Seuls Docker Desktop avec Compose,
-Git et OpenSSL (fourni sur macOS) sont nécessaires sur le Mac.
+Environnement de développement Laravel 13 avec **deux images et deux services
+Docker** : `ftp` contient le code, PHP 8.4, les dépendances Composer (développement
+inclus) et les assets Vite compilés ; `mysql` utilise l'image officielle MySQL 8.4.
+Le serveur MySQL tourne dans son propre conteneur. Seuls Docker Desktop avec
+Compose, Git et OpenSSL (fourni sur macOS) sont nécessaires sur le Mac.
 
 ## Premier lancement
 
@@ -17,19 +18,19 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Ouvrir <http://localhost:8090>. Le premier démarrage initialise MySQL, crée la base
-`ftp` et le compte applicatif avec `DB_USERNAME` / `DB_PASSWORD`, attend une vraie
-connexion de ce compte, puis exécute les migrations avant de lancer HTTP.
-L'état `healthy` vérifie à la fois MySQL et le point de santé Laravel `/up`.
+Ouvrir <http://localhost:8090>. Sur un volume vide, l'image officielle MySQL crée
+la base `ftp` et son compte applicatif. Compose attend que MySQL accepte une
+connexion de ce compte avant de lancer FTP. Laravel vérifie à son tour la
+connexion, exécute les migrations, puis lance HTTP. L'état `healthy` de FTP
+vérifie la base et le point de santé Laravel `/up`.
 
 Le script `prepare-env.sh` crée `.env` depuis l'exemple si nécessaire et génère
 `APP_KEY` seulement si elle est vide ou absente. Il conserve une clé existante et
 n'affiche aucune valeur sensible. Ne pas recopier `.env.example` sur un `.env`
-déjà configuré. Les mots de passe de l'exemple sont des identifiants locaux ; ils
-peuvent être personnalisés dans `.env` **avant le premier démarrage**.
-`MYSQL_ROOT_PASSWORD` est le mot de passe d'administration, distinct du compte
-applicatif. Le même couple `DB_USERNAME` / `DB_PASSWORD` sert à créer ce compte et
-à connecter Laravel.
+déjà configuré. Les identifiants de `.env.example` sont des exemples locaux ; les
+personnaliser dans `.env` avant la première initialisation si nécessaire.
+`DB_USERNAME` et `DB_PASSWORD` sont utilisés à la fois par Laravel et par
+l'initialisation MySQL. `MYSQL_ROOT_PASSWORD` est le mot de passe d'administration.
 
 `.env` est ignoré par Git et exclu du contexte Docker. Compose transmet ses
 variables à l'exécution via `env_file` ; aucune clé ni aucun mot de passe local
@@ -38,17 +39,20 @@ n'est fourni au build. La clé reste dans le `.env` du Mac après reconstruction
 ## Commandes courantes
 
 ```sh
-# Logs de démarrage, du serveur HTTP et de MySQL
-docker compose logs -f --tail=100 ftp
+# Logs de FTP et de MySQL
+docker compose logs -f --tail=100
+
+# Logs de MySQL uniquement
+docker compose logs -f --tail=100 mysql
 
 # Logs applicatifs Laravel
 docker compose exec ftp tail -f storage/logs/laravel.log
 
-# État des migrations (connexion MySQL de Laravel)
+# État des migrations avec la connexion configurée dans Laravel
 docker compose exec --user www-data ftp php artisan migrate:status
 
-# Client MySQL dans le conteneur : saisir DB_PASSWORD à l'invite
-docker compose exec ftp sh -c 'exec mysql --protocol=TCP -h 127.0.0.1 -u "$DB_USERNAME" -p ftp'
+# Client MySQL : saisir DB_PASSWORD à l'invite
+docker compose exec mysql sh -c 'exec mysql -u "$MYSQL_USER" -p "$MYSQL_DATABASE"'
 
 # Arrêt propre et redémarrage du même conteneur
 docker compose stop
@@ -72,23 +76,49 @@ Les images sources sont épinglées par leur digest multiarchitecture ; Docker
 sélectionne nativement ARM64 sur Apple Silicon et AMD64 sur Mac Intel, sans
 forcer une émulation.
 
-## Données MySQL
+## Données persistantes
 
-Le volume nommé `ftp_mysql-data` est monté dans `/var/lib/mysql`. Il survit à
-`restart`, `stop` / `start`, `down` et aux reconstructions. Un volume existant
-n'est pas réinitialisé et ses utilisateurs ne sont pas recréés : conserver les
-mêmes identifiants dans `.env`, ou les modifier explicitement dans MySQL avant de
-mettre `.env` à jour. Si des variables changent, les appliquer avec
+Le volume nommé `ftp_mysql-data` est monté dans `/var/lib/mysql` du conteneur
+`mysql`. Il survit à `restart`, `stop` / `start`, `down` et aux reconstructions.
+Un volume existant n'est pas réinitialisé ; les variables d'initialisation ne
+recréent pas ses comptes ni leurs mots de passe. Garder les identifiants existants
+ou les modifier explicitement dans MySQL avant de mettre `.env` à jour.
+
+Le volume MySQL de l'ancienne image combinée est réutilisé directement. Si un
+compte hérité n'autorise que `localhost` ou `127.0.0.1`, il doit aussi autoriser
+les connexions du conteneur FTP sur le réseau Docker, par exemple avec un compte
+applicatif d'hôte `%` limité à la base `ftp`.
+
+L'ancien volume SQLite `ftp_app-data` et le fichier SQLite d'origine du dépôt
+restent conservés et ne sont pas utilisés par cette configuration. Leurs données
+ne sont pas importées automatiquement dans MySQL.
+
+Si des variables changent, les appliquer avec
 `docker compose up -d --force-recreate` ; `restart` conserve l'ancien environnement.
 
 **`docker compose down -v` supprime la base : ne pas l'utiliser pour arrêter le
-projet.** Les anciens volumes Sail et les fichiers SQLite locaux ne sont ni
-importés, ni supprimés par cette configuration.
+projet.**
 
-MySQL écoute uniquement sur `127.0.0.1:3306` à l'intérieur du conteneur ; seul le
-port HTTP `127.0.0.1:8090` est publié sur le Mac. Le script de démarrage intercepte
-les signaux d'arrêt, termine Laravel et ses workers puis attend l'arrêt de MySQL.
-Compose lui accorde 90 secondes pour terminer.
+Seul le port HTTP `127.0.0.1:8090` est publié sur le Mac. Compose arrête FTP avant
+MySQL. Le script FTP termine Laravel et ses workers ; le conteneur officiel MySQL
+termine son serveur. Chaque service dispose de 90 secondes pour s'arrêter.
+
+## Connexion entre les conteneurs
+
+Laravel utilise le pilote PHP `pdo_mysql` et le nom du service Docker `mysql` :
+
+```dotenv
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=ftp
+DB_USERNAME=ftp
+DB_PASSWORD=ftp_local_password
+```
+
+`mysql:3306` est accessible sur le réseau privé Compose. Le port MySQL n'est pas
+publié sur le Mac : un éventuel serveur MySQL déjà installé sur le Mac peut garder
+son port. Aucun serveur ou client MySQL n'est installé dans l'image FTP.
 
 ## Vérifications
 
@@ -98,7 +128,7 @@ docker compose ps
 curl --fail --silent --output /dev/null --write-out '%{http_code}\n' http://localhost:8090
 docker compose exec --user www-data ftp php artisan migrate:status
 docker compose exec ftp php -v
-docker compose exec ftp mysqld --version
+docker compose exec mysql mysql --version
 docker compose exec ftp uname -m
 ```
 
@@ -113,19 +143,8 @@ docker compose exec -T \
   -e MAIL_MAILER=array ftp vendor/bin/phpunit
 ```
 
-Pour constater la persistance sans toucher aux tables métier, créer une table de
-contrôle dans le client MySQL ci-dessus, puis quitter avec `exit` :
+Pour vérifier que l'image FTP n'embarque aucun serveur ou client MySQL :
 
-```sql
-CREATE TABLE IF NOT EXISTS docker_persistence_check (id INT PRIMARY KEY, value VARCHAR(64));
-INSERT INTO docker_persistence_check VALUES (1, 'ftp-persistence-ok')
-ON DUPLICATE KEY UPDATE value = 'ftp-persistence-ok';
-```
-
-Exécuter `docker compose restart`, attendre l'état `healthy`, rouvrir le client et
-vérifier la valeur, puis supprimer uniquement cette table de contrôle :
-
-```sql
-SELECT * FROM docker_persistence_check;
-DROP TABLE docker_persistence_check;
+```sh
+docker compose exec ftp sh -c '! command -v mysqld && ! command -v mysql && ! command -v mysqladmin'
 ```
