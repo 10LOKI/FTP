@@ -9,17 +9,42 @@ services:
     init: true
     env_file:
       - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8090:8000"
-    volumes:
-      - mysql-data:/var/lib/mysql
     stop_grace_period: 90s
     healthcheck:
-      test: ["CMD-SHELL", "php docker/mysql.php check && curl --fail --silent http://127.0.0.1:8000/up > /dev/null"]
+      test: ["CMD-SHELL", "php docker/database.php check && curl --fail --silent http://127.0.0.1:8000/up > /dev/null"]
       interval: 10s
       timeout: 5s
       start_period: 180s
       retries: 3
+
+  mysql:
+    image: mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-ftp}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_ROOT_HOST: localhost
+    volumes:
+      - mysql-data:/var/lib/mysql
+    stop_grace_period: 90s
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$${MYSQL_PASSWORD}" mysql --protocol=TCP
+          --host=127.0.0.1 --user="$${MYSQL_USER}"
+          --database="$${MYSQL_DATABASE}" --execute="SELECT 1"
+          --silent > /dev/null
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
 
 volumes:
   mysql-data:
