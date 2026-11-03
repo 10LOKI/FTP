@@ -1,38 +1,36 @@
-# FTP-9 — état du checkpoint de conception
+# FTP-9 — dossier v0.3 prêt pour revue
 
-Vérification du 3 novembre 2026 contre FTP-9, FTP-33, FTP-34 et FTP-35 dans Jira.
+Date : 3 novembre 2026. Références : FTP-9, FTP-33, FTP-34, FTP-35 et cahier V3. Le dossier ne vaut pas approbation de la conception.
 
-## Livré dans ce checkpoint
+## Couverture préparée
 
-- Deux diagrammes modifiables dans le fichier Draw.io : UC01–UC16 et diagramme de classes global.
-- Acteurs, frontière système, permissions, attributs, opérations proposées, associations et cardinalités.
-- Scénarios source, contraintes métier et décisions ouvertes extraits du cahier des charges V3.
-- Identifiants textuels, décimaux/devise, instantanés historiques et séparation stock/réservations/finance documentés.
-- Documents sources et sauvegardes locaux exclus de Git et du contexte Docker.
+| Critère | Livrable | État |
+|---|---|---|
+| Deux diagrammes modifiables | FTP-9-conception-v0.1.drawio, contenu v0.3 | Exactement deux pages : UC01–UC16 et classes |
+| Exports lisibles | use-case.svg et classes.svg | Exportés via diagrams.net ; aperçus généraux et détails accès/finance inspectés |
+| Scénarios structurés | SCENARIOS-UC.md | 16 cas : préconditions, déroulement, variantes, postconditions et permissions |
+| Tables/PK/FK/contraintes | MAPPING-DONNEES.md | 62 correspondances proposées ; décisions de précision et de règles métier en attente |
+| Écrans principaux | ECRANS-ET-REVUE.md | Neuf croquis fonctionnels ; identité graphique et déclinaisons finales à valider |
+| Modules/API/transitions | CONTRATS-ET-TRANSITIONS.md | Routes, DTO, erreurs, concurrence/idempotence et transitions proposés |
+| D01–D23 | DECISIONS-D01-D23.md | 23 entrées ; responsables à désigner, aucune approbation inventée |
+| Baseline/capacité/exclusions | ECRANS-ET-REVUE.md et DECISIONS-D01-D23.md | Baseline observée/exclusions documentées ; capacité réelle à confirmer |
+| Revue collective | Feuille dans ECRANS-ET-REVUE.md | Ayoub, Mehdi et Khalid : en attente d’avis réel |
 
-## Vérifications réellement effectuées
+## Vérifications effectuées
 
-- XML lisible : exactement deux pages ; UC01–UC16 présents.
-- Identifiants de cellules uniques, extrémités des associations valides et formes dans les limites de page.
-- Contrôle Git des espaces et exclusions des fichiers locaux.
-- Pas de modification du code applicatif : aucun nouveau test d’exécution ni rebuild nécessaire pour ce checkpoint documentaire.
+- XML : deux pages, identifiants uniques et extrémités des associations valides.
+- Export SVG par le moteur officiel diagrams.net dans un navigateur sans interface ; aucun envoi du cahier source.
+- Inspection des aperçus généraux et des détails accès/finance ; correction des retours à la ligne et du routage qui traversait les classes. Grand canevas vectoriel nécessitant un zoom, sans promesse d’impression A4 lisible.
+- Couverture documentaire : 16 scénarios, 62 correspondances classe/table, 23 décisions ; liens locaux et exclusions Git vérifiés.
+- Documentation seulement : aucun nouveau test d’exécution ni rebuild applicatif requis. Les routes proposées ne sont pas présentées comme implémentées ou testées.
 
-Ces contrôles structurels ne prouvent pas la lisibilité du rendu Draw.io ni la validation métier des cardinalités.
+## Reste pour clôturer réellement
 
-## À terminer avant clôture
+1. Ayoub, Mehdi et Khalid ouvrent les diagrammes et le dossier, enregistrent remarques et accord sur un commit identifié ; corriger les réserves éventuelles.
+2. L’entreprise/l’équipe désigne les responsables D01–D23 et confirme les paramètres ouverts : devise/taxes, délais, références, priorité des reliquats, habilitation d’allocation et affectations financières notamment. Les contraintes déjà imposées restent obligatoires.
+3. Confirmer baseline technique partagée, disponibilité réelle de chacun et périmètre du sprint. React et les routes API ne sont pas implémentés par ce checkpoint.
+4. Consigner la version acceptée, puis décider de la clôture Jira et de l’intégration vers develop selon la procédure d’équipe.
 
-| Élément | État / preuve attendue |
-|---|---|
-| Revue visuelle des deux diagrammes | Vérifier dans Draw.io les chevauchements, chemins des liens et lisibilité à l’export ; ajuster si nécessaire. |
-| Exports lisibles | Ajouter un SVG ou PDF pour chacun des deux diagrammes, après revue du rendu. |
-| Scénarios FTP-33 | Formaliser, pour chaque UC, préconditions, chemin normal, variantes, postconditions et permissions ; la transcription source reste une base de travail. |
-| Correspondance relationnelle FTP-34 | Tableau classe → table, PK/FK, index/unicités, nullabilité et contraintes. Fixer la précision des montants et les affectations financières après décisions métier. |
-| Revue équipe | Ayoub, Mehdi et Khalid : enregistrer date, version/commit relu, remarques et accord. Aucun accord n’est présumé. |
-| Écrans FTP-35 | Croquis accueil/recherche/produit, panier/commande et principaux écrans internes. |
-| Contrats et transitions FTP-35 | Limites de modules API, exemples requête/réponse/erreur, identifiants partagés et transitions d’état avec gardes. |
-| Registre D01–D23 | Pour chaque décision : responsable nommé, état approuvé/en attente, valeur retenue, date et preuve. Ne pas approuver automatiquement les paramètres ouverts. |
-| Baseline technique et capacité | Consigner choix PHP/Laravel/React/Node/base, langues, devise/taxes, délais, disponibilité des trois personnes et exclusions de périmètre. |
+FTP-9 reste en cours. Aucun ticket passé à Done, aucune approbation présumée et aucun message envoyé à l’équipe.
 
-FTP-9 reste « In Progress » au moment de cette vérification. Ce checkpoint ne justifie pas de passer FTP-9, FTP-33, FTP-34 ou FTP-35 à Done. Aucune modification Jira ou notification à l’équipe n’est réalisée.
-
-Sources Jira : [FTP-9](https://elyounssiox-java.atlassian.net/browse/FTP-9), [FTP-33](https://elyounssiox-java.atlassian.net/browse/FTP-33), [FTP-34](https://elyounssiox-java.atlassian.net/browse/FTP-34), [FTP-35](https://elyounssiox-java.atlassian.net/browse/FTP-35).
+Sources : [FTP-9](https://elyounssiox-java.atlassian.net/browse/FTP-9), [FTP-33](https://elyounssiox-java.atlassian.net/browse/FTP-33), [FTP-34](https://elyounssiox-java.atlassian.net/browse/FTP-34), [FTP-35](https://elyounssiox-java.atlassian.net/browse/FTP-35).

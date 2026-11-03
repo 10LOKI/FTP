@@ -1,4 +1,4 @@
-# Conception FTP — v0.2 pour revue
+# Conception FTP — v0.3 pour revue
 
 Source : Cahier_des_charges_Pieces_Camions_V3.pdf, version 3.0 du 01/11/2026, 38 pages. Tickets : FTP-9, FTP-33, FTP-34. Auteur de la première proposition : Ayoub / assistance Codex. Aucun choix ouvert n’est considéré approuvé.
 
@@ -8,13 +8,26 @@ Ouvrir https://app.diagrams.net/ puis « Ouvrir un diagramme existant » et choi
 
 ## Lecture du modèle
 
-Les libellés français décrivent le métier ; les noms de tables anglais et UUID sont des propositions techniques, pas des migrations existantes. Les cardinalités sont écrites sur chaque association sous la forme « cardinalité côté première classe ↔ cardinalité côté seconde classe ». Chaque classe métier apparaît une seule fois dans le diagramme global. Les lignes de panier, commande, devis, livraison, retour, facture, avoir et achat sont des classes distinctes. Les noms de tables restent à fixer avant les migrations. Une association sans flèche n’indique pas une dépendance de navigation.
+Les exports vectoriels lisibles sont disponibles dans [use-case.svg](use-case.svg) et [classes.svg](classes.svg). Le diagramme de classes utilise un grand canevas : ouvrir le SVG dans le navigateur et zoomer pour lire les attributs. Les cardinalités sont placées aux deux extrémités de chaque association. Le fichier Draw.io conserve exactement deux pages ; son nom historique v0.1 est maintenu pour préserver les liens, son contenu porte la version v0.3.
+
+## Dossier de revue
+
+- [SCENARIOS-UC.md](SCENARIOS-UC.md) : 16 scénarios structurés, permissions et critères de recette.
+- [MAPPING-DONNEES.md](MAPPING-DONNEES.md) : 62 correspondances classe/table, PK/FK, nullabilité, unicités et contraintes proposées.
+- [CONTRATS-ET-TRANSITIONS.md](CONTRATS-ET-TRANSITIONS.md) : frontières de modules, conventions API, exemples, erreurs et transitions gardées.
+- [ECRANS-ET-REVUE.md](ECRANS-ET-REVUE.md) : neuf croquis fonctionnels, responsive, baseline observée, exclusions et feuille de revue collective.
+- [DECISIONS-D01-D23.md](DECISIONS-D01-D23.md) : registre des décisions, responsables à désigner, état et preuve ; disponibilité réelle de l’équipe à renseigner.
+- [ETAT-FTP-9.md](ETAT-FTP-9.md) : bilan de couverture et validations restantes.
+
+## Conventions de lecture
+
+Les libellés français décrivent le métier ; les noms de tables anglais et UUID sont des propositions techniques, pas des migrations existantes. Les cardinalités UML sont écrites près des deux extrémités de chaque association ; les contraintes complémentaires figurent dans le mapping. Chaque classe métier apparaît une seule fois dans le diagramme global. Les lignes de panier, commande, devis, livraison, retour, facture, avoir et achat sont des classes distinctes. Les noms de tables restent à fixer avant les migrations. Une association sans flèche n’indique pas une dépendance de navigation.
 
 Chaque opération interne exige les permissions effectives, le périmètre de données et les conditions métier ; le nom du rôle seul ne suffit pas. Les regroupements d’acteurs sont des profils habilités, pas des permissions automatiques. Les associations UC représentent la participation, pas une succession temporelle. Les UC complets ci-dessous décrivent les étapes internes ; aucune relation include/extend artificielle n’est ajoutée.
 
 ## Portée de cette première version
 
-Couverture : UC01–UC16 exacts (p.28–31), modèle logique (p.26–27), contrôles et invariants principaux. Pas de preuve de revue équipe ni de validation métier. FTP-33/34 restent en cours ; FTP-35 demande encore les maquettes, contrats API, transitions détaillées et revue. Aucune migration n’est générée à partir de ce brouillon.
+Couverture : UC01–UC16 exacts (p.28–31), modèle logique (p.26–27), contrôles et invariants principaux. Pas de preuve de revue équipe ni de validation métier. Les livrables de préparation FTP-33/34/35 sont présents en version de revue ; les approbations métier et de l’équipe ne sont pas encore enregistrées. Aucune migration n’est générée à partir de ce brouillon.
 
 ## Carte des cas et permissions
 
