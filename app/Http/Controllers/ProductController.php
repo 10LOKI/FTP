@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ProductReferenceVersionRequest;
 use App\Models\Product;
+use App\Rules\DecimalPrice;
 use App\Rules\ReferenceCode;
+use App\Services\PriceAmount;
 use App\Services\ProductReferenceManager;
+use App\Services\PromotionManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +17,7 @@ use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
-    public function __construct(private ProductReferenceManager $references) {}
+    public function __construct(private ProductReferenceManager $references, private PromotionManager $promotions) {}
 
     public function show(Product $product): JsonResponse
     {
@@ -143,10 +146,24 @@ class ProductController extends Controller
         Gate::authorize('PRODUCT_PRICE_UPDATE');
         $validated = $request->validate([
             'sale_price' => 'required|numeric|min:0|max:9999999999.99|decimal:0,2',
+            'expected_sale_price' => ['sometimes', 'nullable', new DecimalPrice],
         ]);
 
-        $product->sale_price = $validated['sale_price'];
-        $product->save();
+        DB::transaction(function () use ($product, $validated, $request): void {
+            $locked = Product::query()->lockForUpdate()->findOrFail($product->id);
+            if (array_key_exists('expected_sale_price', $validated)) {
+                $expected = $validated['expected_sale_price'] === null ? null : PriceAmount::minorUnits($validated['expected_sale_price']);
+                $current = $locked->sale_price === null ? null : PriceAmount::minorUnits((string) $locked->sale_price);
+                abort_if($expected !== $current, 409, 'Le tarif de base a changé. Actualisez le produit.');
+            }
+            $before = ['product_id' => (string) $locked->id, 'sale_price' => $locked->sale_price];
+            $this->promotions->validateBasePriceChange($locked, (string) $validated['sale_price']);
+            $locked->sale_price = $validated['sale_price'];
+            if ($locked->isDirty('sale_price')) {
+                $locked->save();
+                $this->promotions->record($request->user(), 'pricing.base_price_updated', (string) $locked->id, $before, ['product_id' => (string) $locked->id, 'sale_price' => $locked->sale_price]);
+            }
+        });
 
         return response()->json(null, 204);
     }

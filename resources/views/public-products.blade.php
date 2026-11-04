@@ -12,7 +12,7 @@
             @endif
             <p>{{ $product->part_brand }} {{ $product->category }}</p>
             @if (array_key_exists('sale_price', $product->toArray()) && $product->sale_price !== null)
-                <p>Prix de vente {{ $product->sale_price }}</p>
+                @include('product-price', ['product' => $product])
             @endif
         </article>
     @empty

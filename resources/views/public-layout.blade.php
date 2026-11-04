@@ -6,6 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title') | {{ config('app.company.name') }}</title>
     @vite('resources/js/public-account.jsx')
+    @vite('resources/js/product-price.jsx')
     @stack('assets')
     <style>
         body { font: 1rem/1.6 system-ui, sans-serif; margin: 0; color: #142136; background: #f5f7fa; overflow-wrap: anywhere; }
@@ -52,6 +53,9 @@
             <a href="{{ route('cart.page') }}">Mon panier</a>
         @endcan
         <a href="{{ route('public.contact') }}">Contact</a>
+        @can('catalogue-view-sale-price') <a href="{{ route('customer.promotions') }}">Promotions</a> @endcan
+        @can('PROMOTION_MANAGE') <a href="{{ route('promotions.manage') }}">Gérer les promotions</a> @endcan
+        @can('CUSTOMER_TERMS_MANAGE') <a href="{{ route('discounts.manage') }}">Remises clients</a> @endcan
         @guest
             <a href="{{ route('login') }}">Connexion</a>
             <a href="{{ route('register') }}">Demander un compte</a>
