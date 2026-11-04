@@ -80,8 +80,10 @@ function Cart({ api, catalogue, orders, history }) {
                         <button disabled={busy || !line.orderable}>Mettre à jour</button>
                         <button type="button" disabled={busy} onClick={() => change(line, null)}>Retirer cet article</button>
                     </form>
-                    <p>Prix catalogue par unité : {line.unit_price ?? 'à confirmer'}</p>
-                    <p>Sous-total catalogue : {line.line_subtotal ?? 'à confirmer'}</p>
+                    <p>Prix client par unité : {line.unit_price ?? 'à confirmer'} {line.pricing?.currency}</p>
+                    {line.pricing?.applied_source === 'promotion' && <p>Promotion appliquée : {line.pricing.promotion?.title}</p>}
+                    {line.pricing?.applied_source === 'customer_discount' && <p>Remise client appliquée : {line.pricing.customer_discount_percentage} %</p>}
+                    <p>Sous-total estimé : {line.line_subtotal ?? 'à confirmer'}</p>
                 </article>)}</div>}
             {cart.lines.length > 0 && <p><strong>Sous-total des articles : {cart.totals?.catalogue_subtotal ?? 'à confirmer'}</strong></p>}
             <p>Les frais, remises applicables et la disponibilité seront vérifiés avant confirmation de la commande.</p>

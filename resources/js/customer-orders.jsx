@@ -28,7 +28,7 @@ function OrderDetails({ order }) {
         <h2>{order.number}</h2><p>Statut : {order.status} — {order.submitted_at}</p>
         <p role="status">{order.confirmation}</p>
         <ul>{order.lines.map(line => <li key={line.id}>{line.sku} — {line.designation} (réf. {line.original_reference}) : {line.quantity} × {line.units_per_package} unité(s), sous-total {line.line_subtotal}</li>)}</ul>
-        <p>Sous-total catalogue enregistré : {order.totals.catalogue_subtotal}. Frais et conditions commerciales à confirmer.</p>
+        <p>Sous-total estimé enregistré : {order.totals.catalogue_subtotal} {order.commercial_terms?.currency}. Frais et conditions commerciales à confirmer.</p>
         <p>Contact : {order.contact.name}, {order.contact.email}, {order.contact.phone}</p>
         {['delivery_address', 'billing_address'].map(key => <p key={key}>
             {key === 'delivery_address' ? 'Livraison' : 'Facturation'} : {order[key].address}, {order[key].postal_code} {order[key].city}, {order[key].country}

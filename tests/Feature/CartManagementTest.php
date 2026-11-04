@@ -16,6 +16,12 @@ class CartManagementTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['pricing.timezone' => env('FTP_TEST_PRICING_TIMEZONE', 'UTC')]);
+    }
+
     public function test_guest_and_accounts_without_the_customer_gate_cannot_use_cart(): void
     {
         $product = Product::factory()->create(['publication' => 'published']);
@@ -118,9 +124,9 @@ class CartManagementTest extends TestCase
             $this->putJson($url, $this->payload() + [$field => 123])->assertUnprocessable();
         }
         $response = $this->putJson($url, $this->payload())->assertOk()
-            ->assertJsonPath('data.pricing_status', 'catalogue_estimate')->assertJsonPath('data.totals.catalogue_subtotal', '199.98')
+            ->assertJsonPath('data.pricing_status', 'customer_estimate')->assertJsonPath('data.totals.catalogue_subtotal', '199.98')
             ->assertJsonPath('data.checkout_ready', true);
-        $this->assertSame(['id', 'product_id', 'sku', 'designation', 'original_reference', 'quantity', 'units_per_package', 'orderable', 'unit_price', 'line_subtotal'],
+        $this->assertSame(['id', 'product_id', 'sku', 'designation', 'original_reference', 'quantity', 'units_per_package', 'orderable', 'unit_price', 'line_subtotal', 'pricing'],
             array_keys($response->json('data.lines.0')));
     }
 

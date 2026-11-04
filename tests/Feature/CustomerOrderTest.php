@@ -19,6 +19,12 @@ class CustomerOrderTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['pricing.timezone' => env('FTP_TEST_PRICING_TIMEZONE', 'UTC')]);
+    }
+
     public function test_demo_fixtures_are_repeatable_and_leave_a_real_order_and_cart(): void
     {
         $this->seed(CustomerOrderDemoSeeder::class);

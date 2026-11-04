@@ -5,16 +5,19 @@ namespace App\Services;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\Product;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use stdClass;
 
 /**
- * @phpstan-type CartLine array{id: string, product_id: string, sku: ?string, designation: ?string, original_reference: ?string, quantity: int, units_per_package: int, orderable: bool, unit_price: ?string, line_subtotal: ?string}
+ * @phpstan-type CartLine array{id: string, product_id: string, sku: ?string, designation: ?string, original_reference: ?string, quantity: int, units_per_package: int, orderable: bool, unit_price: ?string, line_subtotal: ?string, pricing: ?array<string, mixed>}
  * @phpstan-type CartState array{id: ?string, version: int, lines: list<CartLine>, pricing_status: string, totals: ?array{catalogue_subtotal: string}}
  */
 class CartService
 {
+    public function __construct(private readonly CustomerPricing $pricing) {}
+
     /** @return CartState */
     public function snapshot(int $userId): array
     {
@@ -29,6 +32,11 @@ class CartService
     /** @param CartState $cart */
     public static function pricingToken(array $cart): string
     {
+        foreach ($cart['lines'] as &$line) {
+            unset($line['pricing']['calculated_at']);
+        }
+        unset($line);
+
         return hash('sha256', json_encode($cart, JSON_THROW_ON_ERROR));
     }
 
@@ -133,32 +141,34 @@ class CartService
     /** @return CartState */
     private function serialize(?stdClass $cart): array
     {
-        $lines = $cart === null ? collect() : DB::table('cart_lines')
+        $rows = $cart === null ? collect() : DB::table('cart_lines')
             ->join('products', 'products.id', '=', 'cart_lines.product_id')
             ->where('cart_lines.cart_id', $cart->id)->orderBy('cart_lines.id')->lockForUpdate()
             ->get(['cart_lines.id', 'cart_lines.product_id', 'cart_lines.quantity', 'cart_lines.units_per_package',
-                'products.sku', 'products.designation', 'products.original_reference', 'products.publication', 'products.sale_price'])
-            ->map(fn (stdClass $line): array => [
-                'id' => (string) $line->id,
-                'product_id' => (string) $line->product_id,
-                'sku' => $line->publication === 'published' ? $line->sku : null,
-                'designation' => $line->publication === 'published' ? $line->designation : null,
-                'original_reference' => $line->publication === 'published' ? $line->original_reference : null,
-                'quantity' => (int) $line->quantity,
-                'units_per_package' => (int) $line->units_per_package,
-                'orderable' => $line->publication === 'published',
-                'unit_price' => $line->publication === 'published' && $line->sale_price !== null
-                    ? bcadd((string) $line->sale_price, '0', 2) : null,
-                'line_subtotal' => $line->publication === 'published' && $line->sale_price !== null
-                    ? bcmul((string) $line->sale_price, bcmul((string) $line->quantity, (string) $line->units_per_package, 0), 2) : null,
-            ]);
+                'products.sku', 'products.designation', 'products.original_reference', 'products.publication', 'products.sale_price']);
+        $products = Product::query()->whereIn('id', $rows->pluck('product_id'))->where('publication', 'published')->get();
+        $quotes = $products->isEmpty() ? [] : $this->pricing->quotes($products, User::query()->findOrFail($cart->user_id));
+        $lines = $rows->map(fn (stdClass $line): array => [
+            'id' => (string) $line->id,
+            'product_id' => (string) $line->product_id,
+            'sku' => $line->publication === 'published' ? $line->sku : null,
+            'designation' => $line->publication === 'published' ? $line->designation : null,
+            'original_reference' => $line->publication === 'published' ? $line->original_reference : null,
+            'quantity' => (int) $line->quantity,
+            'units_per_package' => (int) $line->units_per_package,
+            'orderable' => $line->publication === 'published',
+            'unit_price' => $quotes[$line->product_id]['unit_price'] ?? null,
+            'line_subtotal' => ($quotes[$line->product_id]['unit_price'] ?? null) !== null
+                ? bcmul($quotes[$line->product_id]['unit_price'], bcmul((string) $line->quantity, (string) $line->units_per_package, 0), 2) : null,
+            'pricing' => $quotes[$line->product_id] ?? null,
+        ]);
 
         $priced = $lines->every(fn (array $line): bool => $line['line_subtotal'] !== null);
         $subtotal = $priced ? $lines->reduce(fn (string $sum, array $line): string => bcadd($sum, $line['line_subtotal'], 2), '0.00') : null;
 
         return ['id' => $cart === null ? null : (string) $cart->id,
             'version' => (int) ($cart->version ?? 0), 'lines' => $lines->all(),
-            'pricing_status' => $priced ? 'catalogue_estimate' : 'price_unavailable',
+            'pricing_status' => $priced ? 'customer_estimate' : 'price_unavailable',
             'totals' => $priced ? ['catalogue_subtotal' => $subtotal] : null];
     }
 }

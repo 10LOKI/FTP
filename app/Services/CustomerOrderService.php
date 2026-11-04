@@ -39,7 +39,7 @@ class CustomerOrderService
 
             $cart = $this->carts->snapshot($userId);
             abort_unless($cart['version'] === $canonical['expected_version'], 409, 'Le panier a changé. Vérifiez-le à nouveau.');
-            abort_unless($cart['lines'] !== [] && $cart['pricing_status'] === 'catalogue_estimate'
+            abort_unless($cart['lines'] !== [] && $cart['pricing_status'] === 'customer_estimate'
                 && collect($cart['lines'])->every(fn (array $line): bool => $line['orderable']), 422, 'Le panier contient un article indisponible ou sans prix.');
             abort_unless(hash_equals(CartService::pricingToken($cart), $canonical['pricing_token']), 409, 'Les prix ont changé. Vérifiez le nouveau panier avant de soumettre.');
             foreach ($cart['lines'] as $line) {
@@ -60,13 +60,16 @@ class CustomerOrderService
                 'idempotency_key' => $input['idempotency_key'], 'request_hash' => $hash,
                 'customer_snapshot' => json_encode(['id' => $profile->id, 'customer_code' => $profile->customer_code,
                     'type' => $profile->type, 'company_name' => $profile->company_name], JSON_THROW_ON_ERROR),
-                'commercial_snapshot' => json_encode(['fees' => null, 'discounts' => null, 'currency' => null,
+                'commercial_snapshot' => json_encode(['fees' => null,
+                    'currency' => $cart['lines'][0]['pricing']['currency'],
+                    'tax_basis' => $cart['lines'][0]['pricing']['tax_basis'],
+                    'discounts' => array_map(fn (array $line): array => ['line_id' => $line['id'], 'pricing' => $line['pricing']], $lines),
                     'status' => 'pending_human_review'], JSON_THROW_ON_ERROR),
                 'contact' => json_encode($canonical['contact'], JSON_THROW_ON_ERROR),
                 'delivery_address' => json_encode($canonical['delivery_address'], JSON_THROW_ON_ERROR),
                 'billing_address' => json_encode($canonical['billing_address'], JSON_THROW_ON_ERROR),
                 'lines' => json_encode($lines, JSON_THROW_ON_ERROR),
-                'catalogue_subtotal' => $cart['totals']['catalogue_subtotal'], 'pricing_status' => 'catalogue_estimate',
+                'catalogue_subtotal' => $cart['totals']['catalogue_subtotal'], 'pricing_status' => 'customer_estimate',
                 'customer_note' => $canonical['customer_note'], 'created_at' => $now, 'updated_at' => $now,
             ]);
             DB::table('cart_lines')->where('cart_id', $cart['id'])->delete();
