@@ -133,6 +133,11 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
                     {products.data.map(product => <article key={product.id}>
                         <h3><a href={productUrl.replace('__PRODUCT__', product.id)}>{product.designation}</a></h3>
                         <p>Référence {product.original_reference}</p>
+                        {product.matched_reference && <p>
+                            Correspondance {product.matched_reference.type === 'ORIGINALE' ? 'originale' : 'croisée'} :{' '}
+                            <strong>{product.matched_reference.reference}</strong>
+                            {product.matched_reference.brand && ` · ${product.matched_reference.brand}`}
+                        </p>}
                         <p>{[product.part_brand, product.category].filter(Boolean).join(' · ')}</p>
                         {product.sale_price != null && <p>Prix de vente {product.sale_price}</p>}
                     </article>)}

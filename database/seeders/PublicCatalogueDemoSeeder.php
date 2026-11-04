@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\Product;
+use App\Models\ProductCrossReference;
+use App\Services\ProductReferenceNormalizer;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -28,9 +30,13 @@ class PublicCatalogueDemoSeeder extends Seeder
             DB::table('product_compatibilities')->insertOrIgnore([
                 'product_id' => $product->id, 'vehicle_make' => 'Camion démo', 'vehicle_model' => 'Modèle A',
             ]);
-            DB::table('product_cross_references')->updateOrInsert([
-                'product_id' => $product->id, 'brand' => 'Marque démo', 'reference' => 'CROSS-DEMO-'.$number,
-            ], ['verified_at' => now()]);
+            if (! ProductCrossReference::query()->where('product_id', $product->id)
+                ->where('brand', 'Marque démo')
+                ->where('reference_search_key', ProductReferenceNormalizer::searchKey('CROSS-DEMO-'.$number))->exists()) {
+                ProductCrossReference::factory()->for($product)->verified()->create([
+                    'brand' => 'Marque démo', 'reference' => 'CROSS-DEMO-'.$number,
+                ]);
+            }
         }
     }
 }

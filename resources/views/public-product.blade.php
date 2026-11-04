@@ -7,6 +7,9 @@
 @endpush
 @section('content')
     <h1>{{ $product->designation }}</h1>
+    @can('REFERENCE_MANAGE')
+        <a href="{{ route('product.references.edit', $product->id) }}">Gérer les références de ce produit</a>
+    @endcan
     <div class="grid">
         @if ($product->images)
             <div>
