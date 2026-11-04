@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use stdClass;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 /**
  * @phpstan-type CartLine array{id: string, product_id: string, sku: ?string, designation: ?string, original_reference: ?string, quantity: int, units_per_package: int, orderable: bool, unit_price: ?string, line_subtotal: ?string, pricing: ?array<string, mixed>}
@@ -26,7 +27,7 @@ class CartService
             $cart = DB::table('carts')->where('user_id', $userId)->lockForUpdate()->first();
 
             return $this->serialize($cart);
-        });
+        }, 3);
     }
 
     /** @param CartState $cart */
@@ -146,8 +147,22 @@ class CartService
             ->where('cart_lines.cart_id', $cart->id)->orderBy('cart_lines.id')->lockForUpdate()
             ->get(['cart_lines.id', 'cart_lines.product_id', 'cart_lines.quantity', 'cart_lines.units_per_package',
                 'products.sku', 'products.designation', 'products.original_reference', 'products.publication', 'products.sale_price']);
-        $products = Product::query()->whereIn('id', $rows->pluck('product_id'))->where('publication', 'published')->get();
-        $quotes = $products->isEmpty() ? [] : $this->pricing->quotes($products, User::query()->findOrFail($cart->user_id));
+        $products = Product::query()->whereIn('id', $rows->pluck('product_id'))->where('publication', 'published')
+            ->orderBy('id')->lockForUpdate()->get();
+        $quotes = [];
+        $pricingUnavailable = false;
+        try {
+            if ($products->isNotEmpty()) {
+                $quotes = $this->pricing->quotes($products, User::query()->findOrFail($cart->user_id));
+            }
+        } catch (ServiceUnavailableHttpException) {
+            $pricingUnavailable = true;
+        } catch (ValidationException $exception) {
+            if (! array_key_exists('state', $exception->errors())) {
+                throw $exception;
+            }
+            $pricingUnavailable = true;
+        }
         $lines = $rows->map(fn (stdClass $line): array => [
             'id' => (string) $line->id,
             'product_id' => (string) $line->product_id,
@@ -168,7 +183,7 @@ class CartService
 
         return ['id' => $cart === null ? null : (string) $cart->id,
             'version' => (int) ($cart->version ?? 0), 'lines' => $lines->all(),
-            'pricing_status' => $priced ? 'customer_estimate' : 'price_unavailable',
+            'pricing_status' => $pricingUnavailable ? 'pricing_unavailable' : ($priced ? 'customer_estimate' : 'price_unavailable'),
             'totals' => $priced ? ['catalogue_subtotal' => $subtotal] : null];
     }
 }

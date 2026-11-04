@@ -62,6 +62,7 @@ function Cart({ api, catalogue, orders, history }) {
         <button type="button" onClick={load} disabled={busy}>Actualiser le panier</button>
         {!cart && !message && <p role="status">Chargement du panier…</p>}
         {cart && <>
+            {cart.pricing_status === 'pricing_unavailable' && <p role="status">La tarification est temporairement indisponible. Vous pouvez gérer le panier ; la soumission reste désactivée.</p>}
             {cart.lines.length === 0 ? <p>Votre panier est vide. <a href={catalogue}>Consulter le catalogue</a>.</p>
                 : <div className="grid">{cart.lines.map(line => <article key={line.id}>
                     <h2>{line.designation ?? 'Article retiré du catalogue'}</h2>

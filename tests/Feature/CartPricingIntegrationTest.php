@@ -120,7 +120,8 @@ class CartPricingIntegrationTest extends TestCase
     {
         [, , $cart] = $this->pricedCart();
         config(['pricing.approved' => false]);
-        $this->getJson('/api/v1/me/cart')->assertUnprocessable();
+        $this->getJson('/api/v1/me/cart')->assertOk()->assertJsonPath('data.pricing_status', 'pricing_unavailable')
+            ->assertJsonPath('data.checkout_ready', false)->assertJsonPath('data.totals', null);
         $this->postJson('/api/v1/me/orders', $this->submission($cart))->assertUnprocessable();
         $this->assertDatabaseCount('customer_orders', 0);
         $this->assertDatabaseCount('cart_lines', 1);

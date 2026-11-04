@@ -18,6 +18,8 @@ class CustomerOrderService
      */
     public function submit(int $userId, array $input, string $requestId): array
     {
+        $input['idempotency_key'] = Str::lower($input['idempotency_key']);
+
         return DB::transaction(function () use ($userId, $input, $requestId): array {
             $profile = $this->customer($userId);
             $canonical = [
@@ -29,7 +31,7 @@ class CustomerOrderService
             ];
             $hash = hash('sha256', json_encode($canonical, JSON_THROW_ON_ERROR));
             $existing = DB::table('customer_orders')->where('user_id', $userId)
-                ->where('idempotency_key', $input['idempotency_key'])->first();
+                ->where('idempotency_key', $input['idempotency_key'])->lockForUpdate()->first();
             if ($existing !== null) {
                 abort_unless(hash_equals($existing->request_hash, $hash), 409, 'Cette clé a déjà servi pour une autre demande.');
                 $this->audit($userId, $requestId, $existing->id, 'order.replayed');

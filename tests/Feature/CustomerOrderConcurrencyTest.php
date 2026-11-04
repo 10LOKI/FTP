@@ -7,7 +7,9 @@ use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\CustomerOrderService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Support\Facades\Concurrency;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -51,6 +53,33 @@ class CustomerOrderConcurrencyTest extends TestCase
         $this->assertDatabaseCount('customer_orders', 1);
         $this->assertDatabaseCount('cart_lines', 0);
         $this->assertSame(2, (int) DB::table('carts')->value('version'));
+    }
+
+    public function test_price_committed_after_request_lookup_is_revalidated_before_submission(): void
+    {
+        [$userId, $payload] = $this->prepareCart();
+        $productId = (int) DB::table('cart_lines')->value('product_id');
+        $changed = false;
+        DB::listen(function (QueryExecuted $query) use (&$changed, $productId): void {
+            if ($changed || ! str_contains($query->sql, 'customer_orders') || ! str_contains($query->sql, 'idempotency_key')) {
+                return;
+            }
+            $changed = true;
+            $result = Concurrency::run([static function () use ($productId): int {
+                return DB::table('products')->where('id', $productId)->update(['sale_price' => '16.00']);
+            }]);
+            $this->assertSame(1, $result[0]);
+        });
+        try {
+            app(CustomerOrderService::class)->submit($userId, $payload, (string) Str::uuid());
+            $this->fail('A concurrently changed price must require another review.');
+        } catch (HttpExceptionInterface $exception) {
+            $this->assertSame(409, $exception->getStatusCode());
+        }
+        $this->assertTrue($changed);
+        $this->assertDatabaseCount('customer_orders', 0);
+        $this->assertDatabaseCount('cart_lines', 1);
+        $this->assertDatabaseHas('products', ['id' => $productId, 'sale_price' => '16.00']);
     }
 
     /** @return array{int, array<string, mixed>} */
