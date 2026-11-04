@@ -61,10 +61,12 @@ function Cart({ api, catalogue }) {
         <button type="button" onClick={load} disabled={busy}>Actualiser le panier</button>
         {!cart && !message && <p role="status">Chargement du panier…</p>}
         {cart && <>
+            {cart.pricing_status === 'pricing_unavailable' && <p role="status">La tarification est temporairement indisponible. Vous pouvez gérer le panier ; la soumission reste désactivée.</p>}
             {cart.lines.length === 0 ? <p>Votre panier est vide. <a href={catalogue}>Consulter le catalogue</a>.</p>
                 : <div className="grid">{cart.lines.map(line => <article key={line.id}>
                     <h2>{line.designation ?? 'Article retiré du catalogue'}</h2>
                     {line.sku && <p>SKU {line.sku}</p>}
+                    {line.original_reference && <p>Référence : {line.original_reference}</p>}
                     <p>{line.units_per_package} unité(s) par conditionnement</p>
                     {!line.orderable && <p className="error">Cet article ne peut plus être commandé. Vous pouvez le retirer.</p>}
                     <form key={`${line.id}-${cart.version}`} onSubmit={event => {
@@ -78,8 +80,10 @@ function Cart({ api, catalogue }) {
                         <button disabled={busy || !line.orderable}>Mettre à jour</button>
                         <button type="button" disabled={busy} onClick={() => change(line, null)}>Retirer cet article</button>
                     </form>
-                    <p>Prix catalogue par unité : {line.unit_price ?? 'à confirmer'}</p>
-                    <p>Sous-total catalogue : {line.line_subtotal ?? 'à confirmer'}</p>
+                    <p>Prix client par unité : {line.unit_price ?? 'à confirmer'} {line.pricing?.currency}</p>
+                    {line.pricing?.applied_source === 'promotion' && <p>Promotion appliquée : {line.pricing.promotion?.title}</p>}
+                    {line.pricing?.applied_source === 'customer_discount' && <p>Remise client appliquée : {line.pricing.customer_discount_percentage} %</p>}
+                    <p>Sous-total estimé : {line.line_subtotal ?? 'à confirmer'}</p>
                 </article>)}</div>}
             {cart.lines.length > 0 && <p><strong>Sous-total des articles : {cart.totals?.catalogue_subtotal ?? 'à confirmer'}</strong></p>}
             <p>Les frais, remises applicables et la disponibilité seront vérifiés avant confirmation de la commande.</p>

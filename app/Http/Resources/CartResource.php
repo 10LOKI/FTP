@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\CartService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,6 +21,7 @@ class CartResource extends JsonResource
             'lines' => $this->resource['lines'],
             'pricing_status' => $this->resource['pricing_status'],
             'totals' => $this->resource['totals'],
+            'pricing_token' => CartService::pricingToken($this->resource),
             'checkout_ready' => false,
         ];
     }

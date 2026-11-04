@@ -13,7 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::prefix('v1/me/cart')->middleware([AuditCartRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
+Route::prefix('v1/me/cart')->middleware(['throttle:customer-commerce', AuditCartRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/', [CartController::class, 'show'])->name('cart.show');
     Route::put('/products/{product}', [CartController::class, 'putLine'])->whereNumber('product')->name('cart.lines.put');
     Route::delete('/lines/{line}', [CartController::class, 'destroyLine'])->whereNumber('line')->name('cart.lines.destroy');
