@@ -1,0 +1,132 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Product;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\ViewErrorBag;
+use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
+
+class PublicCatalogueController extends Controller
+{
+    private const PUBLIC_FIELDS = [
+        'id', 'sku', 'designation', 'original_reference', 'part_brand', 'category',
+        'hs_code', 'net_weight', 'weight_unit', 'images', 'publication',
+    ];
+
+    public function index(Request $request): JsonResponse
+    {
+        return response()->json($this->paginate($request))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function catalogue(Request $request): View|Response
+    {
+        try {
+            return view('public-catalogue', ['products' => $this->paginate($request)]);
+        } catch (ValidationException $exception) {
+            return response()->view('public-catalogue', [
+                'products' => new LengthAwarePaginator([], 0, 20),
+                'errors' => (new ViewErrorBag)->put('default', $exception->validator->errors()),
+            ], 422);
+        }
+    }
+
+    public function home(): View
+    {
+        return view('public-home', [
+            'products' => $this->publishedProducts()->latest('id')->limit(6)->get()->each->makeVisible('sale_price'),
+            'categories' => Product::query()->where('publication', 'published')
+                ->whereNotNull('category')->where('category', '!=', '')
+                ->distinct()->orderBy('category')->pluck('category'),
+            'brands' => Product::query()->where('publication', 'published')
+                ->whereNotNull('part_brand')->where('part_brand', '!=', '')
+                ->distinct()->orderBy('part_brand')->pluck('part_brand'),
+        ]);
+    }
+
+    public function detail(int $product): View
+    {
+        return view('public-product', ['product' => $this->productDetail($product)]);
+    }
+
+    private function paginate(Request $request): LengthAwarePaginator
+    {
+        $filters = $request->validate([
+            'category' => 'sometimes|nullable|string|max:255',
+            'part_brand' => 'sometimes|nullable|string|max:255',
+            'vehicle_make' => 'sometimes|nullable|string|max:100',
+            'vehicle_model' => 'sometimes|nullable|string|max:100',
+            'reference' => 'sometimes|nullable|string|max:255',
+            'page' => 'sometimes|required|integer|min:1|max:2147483647',
+            'per_page' => 'sometimes|required|integer|min:1|max:100',
+        ]);
+
+        $products = $this->publishedProducts();
+        foreach (['category', 'part_brand'] as $field) {
+            if (isset($filters[$field])) {
+                $products->where($field, $filters[$field]);
+            }
+        }
+
+        $vehicle = array_intersect_key($filters, array_flip(['vehicle_make', 'vehicle_model']));
+        if ($vehicle !== []) {
+            $products->whereExists(function (QueryBuilder $query) use ($vehicle): void {
+                $query->from('product_compatibilities')
+                    ->whereColumn('product_id', 'products.id')
+                    ->where($vehicle);
+            });
+        }
+
+        if (isset($filters['reference'])) {
+            $products->where(function (Builder $query) use ($filters): void {
+                $query->where('original_reference', $filters['reference'])
+                    ->orWhereExists(function (QueryBuilder $reference) use ($filters): void {
+                        $reference->from('product_cross_references')
+                            ->whereColumn('product_id', 'products.id')
+                            ->where('reference', $filters['reference'])
+                            ->whereNotNull('verified_at');
+                    });
+            });
+        }
+
+        return $products->orderBy('id')
+            ->paginate($filters['per_page'] ?? 20)
+            ->appends($filters)
+            ->through(fn (Product $product): Product => $product->makeVisible('sale_price'));
+    }
+
+    public function show(int $product): JsonResponse
+    {
+        return response()->json($this->productDetail($product))->header('Cache-Control', 'private, no-store');
+    }
+
+    private function productDetail(int $id): Product
+    {
+        $product = $this->publishedProducts()->findOrFail($id)->makeVisible('sale_price');
+
+        $product->setAttribute('cross_references', DB::table('product_cross_references')
+            ->where('product_id', $id)
+            ->whereNotNull('verified_at')
+            ->orderBy('brand')->orderBy('reference')->get(['brand', 'reference']));
+        $product->setAttribute('compatibilities', DB::table('product_compatibilities')
+            ->where('product_id', $id)
+            ->orderBy('vehicle_make')->orderBy('vehicle_model')->get(['vehicle_make', 'vehicle_model']));
+
+        return $product;
+    }
+
+    /** @return Builder<Product> */
+    private function publishedProducts(): Builder
+    {
+        return Product::query()->select(self::PUBLIC_FIELDS)->where('publication', 'published')
+            ->when(Gate::allows('catalogue-view-sale-price'), fn (Builder $query): Builder => $query->addSelect('sale_price'));
+    }
+}

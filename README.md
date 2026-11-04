@@ -148,3 +148,79 @@ Pour vérifier que l'image FTP n'embarque aucun serveur ou client MySQL :
 ```sh
 docker compose exec ftp sh -c '! command -v mysqld && ! command -v mysql && ! command -v mysqladmin'
 ```
+
+## Site public et catalogue — FTP-15
+
+Les pages `/`, `/contact`, `/catalogue` et `/catalogue/{id}` exposent le site public.
+La liste React utilise la véritable API pour filtrer et paginer, avec chargement,
+erreurs, reprise manuelle et navigation précédent/suivant du navigateur. Le
+catalogue reste consultable sans JavaScript ; les formulaires de compte utilisent
+React. Les erreurs sont reliées aux champs et le lien « Aller au contenu » facilite
+la navigation au clavier.
+
+`/connexion` utilise le backend FTP-11 : code client et mot de passe ouvrent une
+session uniquement si le compte est approuvé. `/demande-compte` transmet les
+coordonnées à l'inscription existante, sans droit interne ni approbation implicite.
+Le panier et la commande restent le périmètre FTP-19 et des tickets de vente.
+
+Le prix de vente est réservé aux clients authentifiés dont le profil persistant
+est `APPROUVE`. Cette règle a été confirmée par Khalid le 4 novembre 2026. Elle
+est réévaluée à chaque requête : un compte suspendu perd immédiatement la
+visibilité du prix dans les réponses suivantes. Les coûts d'achat, barcodes de
+logistique et champs internes ne font pas partie du catalogue public. Les
+brouillons et archives retournent 404, même pour un client approuvé.
+
+### Configuration de l'entreprise
+
+Renseigner les variables `COMPANY_*` de `.env.example` dans le `.env` local :
+identité, coordonnées, horaires, présentation, services, visuels approuvés et
+lien vers les informations contractuelles. Les champs non fournis restent absents.
+Aucun délai de réponse, contenu de service, logo ou coordonnées officiels n'est
+inventé. Les marques et familles de l'accueil proviennent des produits publiés.
+Après modification, reconstruire avec `docker compose up -d --build --wait`.
+
+### Exemples Postman
+
+Envoyer `Accept: application/json`. Les filtres sont combinables ; les valeurs
+ci-dessous correspondent uniquement au jeu de démonstration facultatif.
+
+```http
+GET /api/v1/catalogue/products?category=Filtres&per_page=1&page=1
+GET /api/v1/catalogue/products?part_brand=Marque%20d%C3%A9mo%20A
+GET /api/v1/catalogue/products?vehicle_make=Camion%20d%C3%A9mo&vehicle_model=Mod%C3%A8le%20A
+GET /api/v1/catalogue/products?reference=CROSS-DEMO-001
+GET /api/v1/catalogue/products/{id}
+```
+
+La liste contient `data`, `total`, `current_page`, `last_page` et les liens de
+pagination. `per_page` accepte 1 à 100. Une valeur invalide retourne 422 avec les
+erreurs par champ ; une référence inconnue retourne une liste vide. Les références
+originales et croisées vérifiées sont recherchées exactement ; la normalisation
+et la gestion étendue des références sont le périmètre FTP-17.
+
+Pour vérifier la visibilité authentifiée, initialiser la session avec
+`GET /sanctum/csrf-cookie`, conserver ses cookies et envoyer le cookie `XSRF-TOKEN`
+décodé comme en-tête `X-XSRF-TOKEN` sur `POST /api/v1/login` :
+
+```json
+{"identifier":"CODE_D_UN_CLIENT_APPROUVE","password":"MOT_DE_PASSE_DU_COMPTE_DE_TEST"}
+```
+
+Rejouer ensuite les GET avec les cookies de session. Le prix de vente est présent
+uniquement pour le client approuvé et le coût d'achat reste absent. Tester aussi
+une connexion refusée, un profil en attente, un profil suspendu après connexion
+et `POST /api/v1/logout`. L'approbation réelle requiert `CUSTOMER_APPROVE` ; le
+seeder public ne crée aucun compte ni permission et ne remplace pas cette intégration.
+
+### Produits de démonstration facultatifs
+
+Sur la base locale de développement uniquement :
+
+```sh
+docker compose exec --user www-data ftp php artisan db:seed --class=PublicCatalogueDemoSeeder --no-interaction
+```
+
+Ce seeder crée quatre produits identifiables par `FTP15-DEMO-*` : deux publiés,
+un brouillon et une archive, avec références et compatibilités fictives. Il ne
+remplace aucun produit existant et peut être rejoué. Ces données servent à la
+vérification et ne constituent pas un catalogue ni un contenu commercial approuvé.

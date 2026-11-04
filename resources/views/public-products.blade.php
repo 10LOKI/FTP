@@ -1,0 +1,14 @@
+<div class="grid">
+    @forelse ($products as $product)
+        <article>
+            <h2><a href="{{ route('public.product', $product->id) }}">{{ $product->designation }}</a></h2>
+            <p>Référence {{ $product->original_reference }}</p>
+            <p>{{ $product->part_brand }} {{ $product->category }}</p>
+            @if (array_key_exists('sale_price', $product->toArray()) && $product->sale_price !== null)
+                <p>Prix de vente {{ $product->sale_price }}</p>
+            @endif
+        </article>
+    @empty
+        <p>Aucun produit ne correspond à votre recherche. <a href="{{ route('public.contact') }}">Contactez l’équipe</a>.</p>
+    @endforelse
+</div>
