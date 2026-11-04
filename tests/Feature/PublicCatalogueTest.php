@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Models\CustomerProfile;
 use App\Models\Product;
 use App\Models\ProductCrossReference;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -74,8 +74,7 @@ class PublicCatalogueTest extends TestCase
         $product = Product::factory()->create([
             'publication' => 'published', 'sale_price' => '25.00', 'net_purchase_price' => '10.00',
         ]);
-        $approved = User::factory()->create();
-        Gate::define('catalogue-view-sale-price', fn (User $user): bool => $user->is($approved));
+        $approved = CustomerProfile::factory()->create(['approval' => 'APPROUVE'])->user;
         $url = "/api/v1/catalogue/products/{$product->id}";
 
         $this->actingAs(User::factory()->create())->getJson($url)->assertOk()
