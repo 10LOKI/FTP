@@ -26,6 +26,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::define('CART_MANAGE_OWN', fn (User $user): bool => CustomerProfile::query()
+            ->where('user_id', $user->getAuthIdentifier())
+            ->where('approval', 'APPROUVE')->exists());
+
         Gate::define('catalogue-view-sale-price', fn (User $user): bool => CustomerProfile::query()
             ->where('user_id', $user->getAuthIdentifier())
             ->where('approval', 'APPROUVE')->exists());

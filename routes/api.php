@@ -1,15 +1,23 @@
 <?php
 
+use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\CustomerApprovalDecisionController;
 use App\Http\Controllers\CustomerRegistrationController;
 use App\Http\Controllers\CustomerReviewController;
+use App\Http\Middleware\AuditCartRequest;
 use App\Http\Middleware\AuditCustomerApprovalDecision;
 use App\Http\Middleware\AuditCustomerRegistration;
 use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('v1/me/cart')->middleware([AuditCartRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/', [CartController::class, 'show'])->name('cart.show');
+    Route::put('/products/{product}', [CartController::class, 'putLine'])->whereNumber('product')->name('cart.lines.put');
+    Route::delete('/lines/{line}', [CartController::class, 'destroyLine'])->whereNumber('line')->name('cart.lines.destroy');
+});
 
 Route::get('/v1/user', function (Request $request): JsonResponse {
     return response()->json([

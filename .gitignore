@@ -1,5 +1,6 @@
 *.log
 /references-local/
+/AYOUB-TASKS.local.md
 .DS_Store
 .env
 .env.backup

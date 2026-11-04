@@ -48,6 +48,9 @@
         @endif
         <a href="{{ route('public.home') }}">Accueil</a>
         <a href="{{ route('public.catalogue') }}">Catalogue</a>
+        @can('CART_MANAGE_OWN')
+            <a href="{{ route('cart.page') }}">Mon panier</a>
+        @endcan
         <a href="{{ route('public.contact') }}">Contact</a>
         @guest
             <a href="{{ route('login') }}">Connexion</a>

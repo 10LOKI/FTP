@@ -1,5 +1,10 @@
 @extends('public-layout')
 @section('title', $product->designation)
+@push('assets')
+    @can('CART_MANAGE_OWN')
+        @vite('resources/js/customer-cart.jsx')
+    @endcan
+@endpush
 @section('content')
     <h1>{{ $product->designation }}</h1>
     <div class="grid">
@@ -47,6 +52,12 @@
             @else
                 @can('catalogue-view-sale-price')
                     <p>Votre compte est approuvé.</p>
+                    @can('CART_MANAGE_OWN')
+                        <div id="cart-add" data-product="{{ $product->id }}" data-packagings="{{ $cartPackagings->push(1)->unique()->sort()->values()->toJson() }}"
+                            data-api="{{ route('cart.show') }}" data-cart="{{ route('cart.page') }}">
+                            <a href="{{ route('cart.page') }}">Ouvrir mon panier</a>
+                        </div>
+                    @endcan
                 @else
                     <p>Votre compte ne dispose pas de l’accès commercial.</p>
                 @endcan
