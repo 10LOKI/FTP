@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\Product;
+use App\Models\ProductCrossReference;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -30,10 +31,8 @@ class CartManagementTest extends TestCase
     {
         $this->allowCustomer();
         $product = Product::factory()->create(['publication' => 'published']);
-        DB::table('product_cross_references')->insert([
-            ['product_id' => $product->id, 'brand' => 'A', 'reference' => '000123', 'verified_at' => now()],
-            ['product_id' => $product->id, 'brand' => 'B', 'reference' => 'OTHER-REF', 'verified_at' => now()],
-        ]);
+        ProductCrossReference::factory()->verified()->create(['product_id' => $product->id, 'brand' => 'A', 'reference' => '000123']);
+        ProductCrossReference::factory()->verified()->create(['product_id' => $product->id, 'brand' => 'B', 'reference' => 'OTHER-REF']);
         $before = $product->fresh()->getAttributes();
         $this->getJson('/api/v1/me/cart')->assertOk()->assertJsonPath('data.version', 0)->assertJsonCount(0, 'data.lines');
         $this->assertDatabaseCount('carts', 0);
