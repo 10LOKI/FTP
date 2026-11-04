@@ -10,7 +10,7 @@ use Illuminate\Validation\ValidationException;
 use stdClass;
 
 /**
- * @phpstan-type CartLine array{id: string, product_id: string, sku: ?string, designation: ?string, quantity: int, units_per_package: int, orderable: bool, unit_price: ?string, line_subtotal: ?string}
+ * @phpstan-type CartLine array{id: string, product_id: string, sku: ?string, designation: ?string, original_reference: ?string, quantity: int, units_per_package: int, orderable: bool, unit_price: ?string, line_subtotal: ?string}
  * @phpstan-type CartState array{id: ?string, version: int, lines: list<CartLine>, pricing_status: string, totals: ?array{catalogue_subtotal: string}}
  */
 class CartService
@@ -24,6 +24,12 @@ class CartService
 
             return $this->serialize($cart);
         });
+    }
+
+    /** @param CartState $cart */
+    public static function pricingToken(array $cart): string
+    {
+        return hash('sha256', json_encode($cart, JSON_THROW_ON_ERROR));
     }
 
     /** @return CartState */
@@ -129,14 +135,15 @@ class CartService
     {
         $lines = $cart === null ? collect() : DB::table('cart_lines')
             ->join('products', 'products.id', '=', 'cart_lines.product_id')
-            ->where('cart_lines.cart_id', $cart->id)->orderBy('cart_lines.id')
+            ->where('cart_lines.cart_id', $cart->id)->orderBy('cart_lines.id')->lockForUpdate()
             ->get(['cart_lines.id', 'cart_lines.product_id', 'cart_lines.quantity', 'cart_lines.units_per_package',
-                'products.sku', 'products.designation', 'products.publication', 'products.sale_price'])
+                'products.sku', 'products.designation', 'products.original_reference', 'products.publication', 'products.sale_price'])
             ->map(fn (stdClass $line): array => [
                 'id' => (string) $line->id,
                 'product_id' => (string) $line->product_id,
                 'sku' => $line->publication === 'published' ? $line->sku : null,
                 'designation' => $line->publication === 'published' ? $line->designation : null,
+                'original_reference' => $line->publication === 'published' ? $line->original_reference : null,
                 'quantity' => (int) $line->quantity,
                 'units_per_package' => (int) $line->units_per_package,
                 'orderable' => $line->publication === 'published',

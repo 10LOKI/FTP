@@ -119,8 +119,8 @@ class CartManagementTest extends TestCase
         }
         $response = $this->putJson($url, $this->payload())->assertOk()
             ->assertJsonPath('data.pricing_status', 'catalogue_estimate')->assertJsonPath('data.totals.catalogue_subtotal', '199.98')
-            ->assertJsonPath('data.checkout_ready', false);
-        $this->assertSame(['id', 'product_id', 'sku', 'designation', 'quantity', 'units_per_package', 'orderable', 'unit_price', 'line_subtotal'],
+            ->assertJsonPath('data.checkout_ready', true);
+        $this->assertSame(['id', 'product_id', 'sku', 'designation', 'original_reference', 'quantity', 'units_per_package', 'orderable', 'unit_price', 'line_subtotal'],
             array_keys($response->json('data.lines.0')));
     }
 

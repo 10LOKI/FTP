@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Checkout } from './customer-orders';
 
 async function request(url, method = 'GET', values) {
     const response = await fetch(url, {
@@ -25,7 +26,7 @@ async function request(url, method = 'GET', values) {
     return payload.data;
 }
 
-function Cart({ api, catalogue }) {
+function Cart({ api, catalogue, orders, history }) {
     const [cart, setCart] = useState(null);
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState('');
@@ -65,6 +66,7 @@ function Cart({ api, catalogue }) {
                 : <div className="grid">{cart.lines.map(line => <article key={line.id}>
                     <h2>{line.designation ?? 'Article retiré du catalogue'}</h2>
                     {line.sku && <p>SKU {line.sku}</p>}
+                    {line.original_reference && <p>Référence : {line.original_reference}</p>}
                     <p>{line.units_per_package} unité(s) par conditionnement</p>
                     {!line.orderable && <p className="error">Cet article ne peut plus être commandé. Vous pouvez le retirer.</p>}
                     <form key={`${line.id}-${cart.version}`} onSubmit={event => {
@@ -83,6 +85,7 @@ function Cart({ api, catalogue }) {
                 </article>)}</div>}
             {cart.lines.length > 0 && <p><strong>Sous-total des articles : {cart.totals?.catalogue_subtotal ?? 'à confirmer'}</strong></p>}
             <p>Les frais, remises applicables et la disponibilité seront vérifiés avant confirmation de la commande.</p>
+            <Checkout cart={cart} api={orders} history={history} reload={load} />
             <a href={catalogue}>Continuer mes achats</a>
         </>}
     </section>;
@@ -132,7 +135,8 @@ function AddToCart({ api, product, packagings, cartUrl }) {
 }
 
 const cartRoot = document.getElementById('customer-cart');
-if (cartRoot) createRoot(cartRoot).render(<Cart api={cartRoot.dataset.api} catalogue={cartRoot.dataset.catalogue} />);
+if (cartRoot) createRoot(cartRoot).render(<Cart api={cartRoot.dataset.api} catalogue={cartRoot.dataset.catalogue}
+    orders={cartRoot.dataset.orders} history={cartRoot.dataset.history} />);
 const addRoot = document.getElementById('cart-add');
 if (addRoot) createRoot(addRoot).render(<AddToCart api={addRoot.dataset.api} product={addRoot.dataset.product}
     packagings={JSON.parse(addRoot.dataset.packagings).map(Number)} cartUrl={addRoot.dataset.cart} />);

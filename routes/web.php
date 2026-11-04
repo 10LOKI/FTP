@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CartController;
+use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductReferenceController;
@@ -22,6 +23,7 @@ Route::get('/gestion/produits/{product}/references', [ProductReferenceController
     ->middleware(['auth', EnsureCustomerApproved::class])->name('product.references.edit');
 
 Route::get('/panier', [CartController::class, 'page'])->middleware(['auth', EnsureCustomerApproved::class])->name('cart.page');
+Route::get('/mes-commandes', [CustomerOrderController::class, 'page'])->middleware(['auth', EnsureCustomerApproved::class])->name('customer.orders.page');
 
 Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/{product}', [ProductController::class, 'show']);
