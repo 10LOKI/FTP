@@ -195,8 +195,7 @@ GET /api/v1/catalogue/products/{id}
 La liste contient `data`, `total`, `current_page`, `last_page` et les liens de
 pagination. `per_page` accepte 1 à 100. Une valeur invalide retourne 422 avec les
 erreurs par champ ; une référence inconnue retourne une liste vide. Les références
-originales et croisées vérifiées sont recherchées exactement ; la normalisation
-et la gestion étendue des références sont le périmètre FTP-17.
+originales et croisées vérifiées sont recherchées selon la règle FTP-17 ci-dessous.
 
 Pour vérifier la visibilité authentifiée, initialiser la session avec
 `GET /sanctum/csrf-cookie`, conserver ses cookies et envoyer le cookie `XSRF-TOKEN`
@@ -224,3 +223,109 @@ Ce seeder crée quatre produits identifiables par `FTP15-DEMO-*` : deux publiés
 un brouillon et une archive, avec références et compatibilités fictives. Il ne
 remplace aucun produit existant et peut être rejoué. Ces données servent à la
 vérification et ne constituent pas un catalogue ni un contenu commercial approuvé.
+
+## Recherche par références — FTP-17
+
+Règle confirmée par Khalid le 4 novembre 2026 : ignorer la casse et les espaces
+de présentation (y compris espaces insécables et tabulations), en conservant
+les points, tirets, autres symboles et zéros initiaux. Le texte saisi reste stocké
+et affiché sans réécriture. Par exemple `crf200028` retrouve `CR F 200028`,
+`03434301000` retrouve `03 434 3010 00`, mais `566830H195` ne retrouve pas
+`566830.H195`. Aucun rapprochement partiel, par désignation ou par ressemblance
+n'est effectué ; les correspondances entre codes différents sont explicites.
+
+Les valeurs normalisées et leurs clés de recherche sont persistées et indexées.
+Les clés SHA-256 rendent les comparaisons indépendantes des collations SQL qui
+pourraient ignorer des caractères significatifs. La migration renseigne les clés
+des données existantes sans modifier les codes bruts, décisions de vérification
+ou identités, et sans supprimer de doublons historiques. Les modèles Product et
+ProductCrossReference maintiennent les clés lors des écritures ; utiliser ces
+modèles et leurs factories, pas des écritures SQL brutes dépourvues de clés.
+Un changement futur de normalisation demande une nouvelle migration de clés.
+
+Le même endpoint public accepte `reference`, les filtres existants et la pagination.
+Une égalité littérale passe avant les variantes normalisées, puis les produits
+sont ordonnés par ID. Chaque produit apparaît une fois, même si plusieurs de ses
+associations correspondent. Une référence partagée retourne tous les produits
+publiés autorisés ; une référence croisée non vérifiée ne donne pas de résultat.
+Chaque résultat comporte un objet `matched_reference` :
+
+```json
+{"type":"CROISEE","reference":"566830.H195","brand":"Source démo","match":"exact"}
+```
+
+`type` vaut ORIGINALE ou CROISEE ; `match` vaut exact ou normalized. React et le
+fallback HTML affichent le type, le code et la source correspondants, puis un lien
+vers le produit canonique. Les refus de publication et de prix restent appliqués.
+Une recherche inconnue reste sans écriture et propose le contact. Un texte ne
+contenant que des espaces retourne 422 avec une erreur sur `reference`.
+
+### Gestion protégée des références
+
+L'éditeur React est à `/gestion/produits/{id}/references`. Il utilise la session
+existante, CSRF et la capacité serveur `REFERENCE_MANAGE` ; un client suspendu
+reste refusé. Cette capacité doit être fournie par le véritable module de
+permissions : aucune gate permissive, compte spécial ou identifiant publié
+n'est ajouté par FTP-17. Les tests autorisés utilisent des permissions de test ;
+ils ne valident pas le raccordement réel des rôles FTP-13.
+
+```http
+GET    /api/v1/products/{id}/references
+POST   /api/v1/products/{id}/references
+PUT    /api/v1/products/{id}/references/{referenceId}
+PATCH  /api/v1/products/{id}/references/{referenceId}/verification
+DELETE /api/v1/products/{id}/references/{referenceId}
+PUT    /api/v1/products/{id}/original-reference
+```
+
+POST accepte `{"reference":"0343012","brand":"Source connue"}` ; la source
+est facultative. Une nouvelle association reste à vérifier. Une répétition
+équivalente pour le même produit et la même source retourne l'association
+existante (200 au lieu de 201), sans modifier son texte ni répéter l'audit.
+
+PUT d'une référence croisée ajoute `"version":1` aux champs ci-dessus. PATCH de
+vérification et DELETE exigent eux aussi `{"version":1}` : c'est une évolution
+du PATCH de vérification FTP-16, dont les clients doivent désormais transmettre
+la version reçue par GET. Une version périmée retourne 409. Modifier le code ou
+sa source incrémente sa version et retire sa vérification ; une vérification
+répétée de la même version conserve sa date et ne répète pas l'audit.
+
+PUT de la référence originale accepte
+`{"reference":"CR F 200028","expected_reference":"ANCIEN CODE"}`. Un ancien
+texte périmé retourne 409. Les changements de références via l'ancienne mise à
+jour produit ou `/logistics` demandent également REFERENCE_MANAGE ; les seules
+permissions descriptives ne permettent pas de contourner ce contrôle.
+
+Une association d'un autre produit retourne 404. Les champs injectés, notamment
+verified_at, product_id ou une clé calculée, sont refusés. Ajouts, modifications,
+vérifications et suppressions sont audités dans la même transaction, avec auteur,
+sans prix ni secret. Une erreur d'audit annule l'écriture. La suppression demande
+une confirmation nommant le code dans l'interface et conserve le produit.
+
+### Exemples du cahier et limites d'intégration
+
+Le jeu local facultatif crée les exemples du moyeu, du manchon et une collision
+`PARTAGE-FTP17` entre deux produits publiés, plus un brouillon et une archive :
+
+```sh
+docker compose exec --user www-data ftp php artisan db:seed --class=ReferenceSearchDemoSeeder --no-interaction
+```
+
+```http
+GET /api/v1/catalogue/products?reference=CR%20F%20200028
+GET /api/v1/catalogue/products?reference=0343012
+GET /api/v1/catalogue/products?reference=03%20434%203010%2000
+GET /api/v1/catalogue/products?reference=200028
+GET /api/v1/catalogue/products?reference=566830.H195
+GET /api/v1/catalogue/products?reference=SET%201372
+GET /api/v1/catalogue/products?reference=PARTAGE-FTP17&per_page=1
+```
+
+Les cinq produits `FTP17-DEMO-*` et leurs références sont fictifs. Aucun compte,
+droit ou stock n'est créé. La recherche ne filtre pas selon le stock et retrouve
+aussi un produit sans inventaire. Le module de stock FTP-24 et la politique de
+visibilité des disponibilités ne sont pas encore intégrés : l'affichage réel
+d'un disponible zéro et le scénario REC44 restent à vérifier avec cette source.
+Ne pas interpréter l'absence de stock renseigné comme une quantité zéro ou une
+disponibilité garantie. Le raccordement réel de REFERENCE_MANAGE reste également
+nécessaire avant une recette complète de la gestion des références.

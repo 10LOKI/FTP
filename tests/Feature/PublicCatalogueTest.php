@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Product;
+use App\Models\ProductCrossReference;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -89,10 +90,8 @@ class PublicCatalogueTest extends TestCase
         Route::get('/test-login', fn () => 'Connexion')->name('login');
         Route::getRoutes()->refreshNameLookups();
         $product = Product::factory()->create(['publication' => 'published']);
-        DB::table('product_cross_references')->insert([
-            ['product_id' => $product->id, 'brand' => 'Example', 'reference' => '000123-A', 'verified_at' => now()],
-            ['product_id' => $product->id, 'brand' => 'Example', 'reference' => '000123-B', 'verified_at' => null],
-        ]);
+        ProductCrossReference::factory()->for($product)->verified()->create(['brand' => 'Example', 'reference' => '000123-A']);
+        ProductCrossReference::factory()->for($product)->create(['brand' => 'Example', 'reference' => '000123-B']);
 
         $this->get("/catalogue/{$product->id}")->assertOk()
             ->assertSee('000123-A')->assertDontSee('000123-B')

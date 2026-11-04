@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PublicCatalogueController;
 use App\Http\Controllers\PublicContactController;
 use App\Http\Middleware\EnsureCustomerApproved;
@@ -16,12 +17,21 @@ Route::view('/connexion', 'public-account', ['mode' => 'login'])->name('login');
 Route::view('/demande-compte', 'public-account', ['mode' => 'register'])->name('register');
 Route::post('/contact', [PublicContactController::class, 'store'])
     ->middleware('throttle:5,1')->name('public.contact.store');
+Route::get('/gestion/produits/{product}/references', [ProductReferenceController::class, 'edit'])
+    ->middleware(['auth', EnsureCustomerApproved::class])->name('product.references.edit');
 
 Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/{product}', [ProductController::class, 'show']);
     Route::get('/{product}/purchase-price', [ProductController::class, 'purchasePrice']);
     Route::patch('/{product}/references/{reference}/verification', [ProductController::class, 'verifyReference'])
-        ->whereNumber('reference');
+        ->whereNumber('reference')->name('product.references.verify');
+    Route::get('/{product}/references', [ProductReferenceController::class, 'index'])->name('product.references.index');
+    Route::post('/{product}/references', [ProductReferenceController::class, 'store'])->name('product.references.store');
+    Route::put('/{product}/original-reference', [ProductReferenceController::class, 'updateOriginal'])->name('product.references.original');
+    Route::put('/{product}/references/{reference}', [ProductReferenceController::class, 'update'])
+        ->whereNumber('reference')->name('product.references.update');
+    Route::delete('/{product}/references/{reference}', [ProductReferenceController::class, 'destroy'])
+        ->whereNumber('reference')->name('product.references.destroy');
     Route::post('/', [ProductController::class, 'store']);
     Route::put('/{product}', [ProductController::class, 'update']);
     Route::put('/{product}/logistics', [ProductController::class, 'logistics']);
