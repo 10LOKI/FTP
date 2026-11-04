@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { PriceDisplay } from './price-display.jsx';
 
 const fields = [
     ['reference', 'Référence', 255],
@@ -15,6 +16,7 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
     const [errors, setErrors] = useState(initialErrors);
     const [message, setMessage] = useState('');
     const [loading, setLoading] = useState(false);
+    const [priceNotice, setPriceNotice] = useState('');
     const request = useRef(null);
     const lastSearch = useRef(window.location.search);
     const errorSummary = useRef(null);
@@ -24,7 +26,7 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
         if (message) errorSummary.current?.focus();
     }, [message]);
 
-    async function load(search, updateHistory = true) {
+    async function load(search, updateHistory = true, priceRefresh = false) {
         request.current?.abort();
         const controller = new AbortController();
         request.current = controller;
@@ -60,8 +62,13 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
                 throw new Error('La réponse du catalogue est indisponible. Réessayez.');
             }
             if (controller.signal.aborted) return;
+            if (priceRefresh) {
+                const previous = products.data.map(product => [product.id, product.pricing?.fingerprint]);
+                const next = data.data.map(product => [product.id, product.pricing?.fingerprint]);
+                if (JSON.stringify(previous) !== JSON.stringify(next)) setPriceNotice('Les offres ou les prix ont changé. Vérifiez les tarifs actualisés.');
+            }
             setProducts(data);
-            resultsHeading.current?.focus();
+            if (!priceRefresh) resultsHeading.current?.focus();
         } catch (error) {
             if (!controller.signal.aborted) {
                 setMessage(error instanceof TypeError || error instanceof SyntaxError
@@ -81,6 +88,20 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
             window.removeEventListener('popstate', navigate);
         };
     }, []);
+
+    useEffect(() => {
+        if (!products.refresh_after_ms || message) return;
+        const refresh = () => load(lastSearch.current, false, true);
+        const timer = window.setTimeout(refresh, products.refresh_after_ms);
+        const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+        window.addEventListener('focus', refresh);
+        document.addEventListener('visibilitychange', visible);
+        return () => {
+            window.clearTimeout(timer);
+            window.removeEventListener('focus', refresh);
+            document.removeEventListener('visibilitychange', visible);
+        };
+    }, [products, message]);
 
     function submit(event) {
         event.preventDefault();
@@ -108,6 +129,7 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
     }
 
     return <>
+        {priceNotice && <p role="status">{priceNotice}</p>}
         <form className="grid" method="get" action={catalogueUrl} onSubmit={submit}>
             {fields.map(([field, label, maxLength]) => <label key={field} htmlFor={`filter-${field}`}>
                 {label}
@@ -139,7 +161,7 @@ function Catalogue({ initialProducts, initialFilters, initialErrors, apiUrl, cat
                             {product.matched_reference.brand && ` · ${product.matched_reference.brand}`}
                         </p>}
                         <p>{[product.part_brand, product.category].filter(Boolean).join(' · ')}</p>
-                        {product.sale_price != null && <p>Prix de vente {product.sale_price}</p>}
+                        {product.pricing ? <PriceDisplay price={product.pricing} /> : product.sale_price != null && <p>Prix de vente {product.sale_price}</p>}
                     </article>)}
                 </div> : <p>Aucun produit ne correspond à votre recherche. <a href={contactUrl}>Contactez l’équipe</a>.</p>}
                 <nav className="pagination" aria-label="Pagination">

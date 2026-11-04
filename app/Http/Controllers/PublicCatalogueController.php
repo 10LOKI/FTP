@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Rules\ReferenceCode;
+use App\Services\CustomerPricing;
 use App\Services\ProductReferenceNormalizer;
 use App\Services\ProductReferenceSearch;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,7 +21,7 @@ use Illuminate\View\View;
 
 class PublicCatalogueController extends Controller
 {
-    public function __construct(private ProductReferenceSearch $referenceSearch) {}
+    public function __construct(private ProductReferenceSearch $referenceSearch, private CustomerPricing $pricing) {}
 
     private const PUBLIC_FIELDS = [
         'id', 'sku', 'designation', 'original_reference', 'part_brand', 'category',
@@ -29,7 +30,28 @@ class PublicCatalogueController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        return response()->json($this->paginate($request))->header('Cache-Control', 'private, no-store');
+        return response()->json($this->payload($this->paginate($request)))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function promotions(Request $request): JsonResponse
+    {
+        Gate::authorize('catalogue-view-sale-price');
+
+        return response()->json($this->payload($this->paginate($request, true)))->header('Cache-Control', 'private, no-store');
+    }
+
+    public function promotionsPage(Request $request): View|Response
+    {
+        Gate::authorize('catalogue-view-sale-price');
+
+        try {
+            return view('public-catalogue', ['products' => $this->paginate($request, true), 'promotionsOnly' => true]);
+        } catch (ValidationException $exception) {
+            return response()->view('public-catalogue', [
+                'products' => new LengthAwarePaginator([], 0, 20), 'promotionsOnly' => true,
+                'errors' => (new ViewErrorBag)->put('default', $exception->validator->errors()),
+            ], 422);
+        }
     }
 
     public function catalogue(Request $request): View|Response
@@ -46,8 +68,13 @@ class PublicCatalogueController extends Controller
 
     public function home(): View
     {
+        $products = $this->publishedProducts()->latest('id')->limit(6)->get()->each->makeVisible('sale_price');
+        if (Gate::allows('catalogue-view-sale-price')) {
+            $this->pricing->annotate($products, request()->user());
+        }
+
         return view('public-home', [
-            'products' => $this->publishedProducts()->latest('id')->limit(6)->get()->each->makeVisible('sale_price'),
+            'products' => $products,
             'categories' => Product::query()->where('publication', 'published')
                 ->whereNotNull('category')->where('category', '!=', '')
                 ->distinct()->orderBy('category')->pluck('category'),
@@ -62,7 +89,7 @@ class PublicCatalogueController extends Controller
         return view('public-product', ['product' => $this->productDetail($product)]);
     }
 
-    private function paginate(Request $request): LengthAwarePaginator
+    private function paginate(Request $request, bool $promotionsOnly = false): LengthAwarePaginator
     {
         $filters = $request->validate([
             'category' => 'sometimes|nullable|string|max:255',
@@ -75,6 +102,11 @@ class PublicCatalogueController extends Controller
         ]);
 
         $products = $this->publishedProducts();
+        if ($promotionsOnly) {
+            $at = now('UTC');
+            $products->whereExists(fn (QueryBuilder $query) => $query->from('promotions')->whereColumn('product_id', 'products.id')
+                ->where('state', 'enabled')->where('starts_at', '<=', $at)->where('ends_at', '>', $at));
+        }
         foreach (['category', 'part_brand'] as $field) {
             if (isset($filters[$field])) {
                 $products->where($field, $filters[$field]);
@@ -103,6 +135,10 @@ class PublicCatalogueController extends Controller
             $this->referenceSearch->annotate($page->getCollection(), $filters['reference']);
         }
 
+        if (Gate::allows('catalogue-view-sale-price')) {
+            $this->pricing->annotate($page->getCollection(), $request->user());
+        }
+
         return $page;
     }
 
@@ -125,7 +161,17 @@ class PublicCatalogueController extends Controller
             ->where('product_id', $id)
             ->orderBy('vehicle_make')->orderBy('vehicle_model')->get(['vehicle_make', 'vehicle_model']));
 
+        if (Gate::allows('catalogue-view-sale-price')) {
+            $this->pricing->annotate(collect([$product]), request()->user());
+        }
+
         return $product;
+    }
+
+    /** @return array<string, mixed> */
+    private function payload(LengthAwarePaginator $page): array
+    {
+        return $page->toArray() + (Gate::allows('catalogue-view-sale-price') ? ['refresh_after_ms' => $this->pricing->refreshAfterMs()] : []);
     }
 
     /** @return Builder<Product> */

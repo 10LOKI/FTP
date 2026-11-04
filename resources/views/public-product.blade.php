@@ -24,7 +24,7 @@
                 <p>Poids net {{ $product->net_weight }} {{ $product->weight_unit }}</p>
             @endif
             @if (array_key_exists('sale_price', $product->toArray()) && $product->sale_price !== null)
-                <p>Prix de vente {{ $product->sale_price }}</p>
+                @include('product-price', ['product' => $product])
             @endif
             @if ($product->cross_references->isNotEmpty())
                 <h2>Références croisées vérifiées</h2>
