@@ -1,6 +1,9 @@
 .git
 references-local
 AYOUB-TASKS.local.md
+AGENTS.md
+STATUS.local.md
+WORKFLOW.local.md
 .env
 .env.*
 !.env.example
