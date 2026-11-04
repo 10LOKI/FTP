@@ -1,13 +1,15 @@
 <?php
 
+use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\ProductController;
+use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
-Route::prefix('api/v1/products')->middleware('auth')->group(function (): void {
+Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/{product}', [ProductController::class, 'show']);
     Route::get('/{product}/purchase-price', [ProductController::class, 'purchasePrice']);
     Route::patch('/{product}/references/{reference}/verification', [ProductController::class, 'verifyReference'])
@@ -19,3 +21,6 @@ Route::prefix('api/v1/products')->middleware('auth')->group(function (): void {
     Route::patch('/{product}/price', [ProductController::class, 'price']);
     Route::patch('/{product}/publication', [ProductController::class, 'publication']);
 });
+
+Route::post('/api/v1/login', [CustomerSessionController::class, 'store'])->middleware('throttle:customer-login');
+Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum');

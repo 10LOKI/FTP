@@ -2,6 +2,8 @@
 
 return [
 
+    'customer_portal_url' => env('CUSTOMER_PORTAL_URL', env('APP_URL', 'http://localhost:8090')),
+
     /*
     |--------------------------------------------------------------------------
     | Default Mailer
