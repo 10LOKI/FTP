@@ -148,3 +148,362 @@ Pour vérifier que l'image FTP n'embarque aucun serveur ou client MySQL :
 ```sh
 docker compose exec ftp sh -c '! command -v mysqld && ! command -v mysql && ! command -v mysqladmin'
 ```
+
+## Site public et catalogue — FTP-15
+
+Les pages `/`, `/contact`, `/catalogue` et `/catalogue/{id}` exposent le site public.
+La liste React utilise la véritable API pour filtrer et paginer, avec chargement,
+erreurs, reprise manuelle et navigation précédent/suivant du navigateur. Le
+catalogue reste consultable sans JavaScript ; les formulaires de compte utilisent
+React. Les erreurs sont reliées aux champs et le lien « Aller au contenu » facilite
+la navigation au clavier.
+
+`/connexion` utilise le backend FTP-11 : code client et mot de passe ouvrent une
+session uniquement si le compte est approuvé. `/demande-compte` transmet les
+coordonnées à l'inscription existante, sans droit interne ni approbation implicite.
+Le panier et la commande restent le périmètre FTP-19 et des tickets de vente.
+
+Le prix de vente est réservé aux clients authentifiés dont le profil persistant
+est `APPROUVE`. Cette règle a été confirmée par Khalid le 4 novembre 2026. Elle
+est réévaluée à chaque requête : un compte suspendu perd immédiatement la
+visibilité du prix dans les réponses suivantes. Les coûts d'achat, barcodes de
+logistique et champs internes ne font pas partie du catalogue public. Les
+brouillons et archives retournent 404, même pour un client approuvé.
+
+### Configuration de l'entreprise
+
+Renseigner les variables `COMPANY_*` de `.env.example` dans le `.env` local :
+identité, coordonnées, horaires, présentation, services, visuels approuvés et
+lien vers les informations contractuelles. Les champs non fournis restent absents.
+Aucun délai de réponse, contenu de service, logo ou coordonnées officiels n'est
+inventé. Les marques et familles de l'accueil proviennent des produits publiés.
+Après modification, reconstruire avec `docker compose up -d --build --wait`.
+
+### Exemples Postman
+
+Envoyer `Accept: application/json`. Les filtres sont combinables ; les valeurs
+ci-dessous correspondent uniquement au jeu de démonstration facultatif.
+
+```http
+GET /api/v1/catalogue/products?category=Filtres&per_page=1&page=1
+GET /api/v1/catalogue/products?part_brand=Marque%20d%C3%A9mo%20A
+GET /api/v1/catalogue/products?vehicle_make=Camion%20d%C3%A9mo&vehicle_model=Mod%C3%A8le%20A
+GET /api/v1/catalogue/products?reference=CROSS-DEMO-001
+GET /api/v1/catalogue/products/{id}
+```
+
+La liste contient `data`, `total`, `current_page`, `last_page` et les liens de
+pagination. `per_page` accepte 1 à 100. Une valeur invalide retourne 422 avec les
+erreurs par champ ; une référence inconnue retourne une liste vide. Les références
+originales et croisées vérifiées sont recherchées selon la règle FTP-17 ci-dessous.
+
+Pour vérifier la visibilité authentifiée, initialiser la session avec
+`GET /sanctum/csrf-cookie`, conserver ses cookies et envoyer le cookie `XSRF-TOKEN`
+décodé comme en-tête `X-XSRF-TOKEN` sur `POST /api/v1/login` :
+
+```json
+{"identifier":"CODE_D_UN_CLIENT_APPROUVE","password":"MOT_DE_PASSE_DU_COMPTE_DE_TEST"}
+```
+
+Rejouer ensuite les GET avec les cookies de session. Le prix de vente est présent
+uniquement pour le client approuvé et le coût d'achat reste absent. Tester aussi
+une connexion refusée, un profil en attente, un profil suspendu après connexion
+et `POST /api/v1/logout`. L'approbation réelle requiert `CUSTOMER_APPROVE` ; le
+seeder public ne crée aucun compte ni permission et ne remplace pas cette intégration.
+
+### Produits de démonstration facultatifs
+
+Sur la base locale de développement uniquement :
+
+```sh
+docker compose exec --user www-data ftp php artisan db:seed --class=PublicCatalogueDemoSeeder --no-interaction
+```
+
+Ce seeder crée quatre produits identifiables par `FTP15-DEMO-*` : deux publiés,
+un brouillon et une archive, avec références et compatibilités fictives. Il ne
+remplace aucun produit existant et peut être rejoué. Ces données servent à la
+vérification et ne constituent pas un catalogue ni un contenu commercial approuvé.
+
+## Recherche par références — FTP-17
+
+Règle confirmée par Khalid le 4 novembre 2026 : ignorer la casse et les espaces
+de présentation (y compris espaces insécables et tabulations), en conservant
+les points, tirets, autres symboles et zéros initiaux. Le texte saisi reste stocké
+et affiché sans réécriture. Par exemple `crf200028` retrouve `CR F 200028`,
+`03434301000` retrouve `03 434 3010 00`, mais `566830H195` ne retrouve pas
+`566830.H195`. Aucun rapprochement partiel, par désignation ou par ressemblance
+n'est effectué ; les correspondances entre codes différents sont explicites.
+
+Les valeurs normalisées et leurs clés de recherche sont persistées et indexées.
+Les clés SHA-256 rendent les comparaisons indépendantes des collations SQL qui
+pourraient ignorer des caractères significatifs. La migration renseigne les clés
+des données existantes sans modifier les codes bruts, décisions de vérification
+ou identités, et sans supprimer de doublons historiques. Les modèles Product et
+ProductCrossReference maintiennent les clés lors des écritures ; utiliser ces
+modèles et leurs factories, pas des écritures SQL brutes dépourvues de clés.
+Un changement futur de normalisation demande une nouvelle migration de clés.
+
+Le même endpoint public accepte `reference`, les filtres existants et la pagination.
+Une égalité littérale passe avant les variantes normalisées, puis les produits
+sont ordonnés par ID. Chaque produit apparaît une fois, même si plusieurs de ses
+associations correspondent. Une référence partagée retourne tous les produits
+publiés autorisés ; une référence croisée non vérifiée ne donne pas de résultat.
+Chaque résultat comporte un objet `matched_reference` :
+
+```json
+{"type":"CROISEE","reference":"566830.H195","brand":"Source démo","match":"exact"}
+```
+
+`type` vaut ORIGINALE ou CROISEE ; `match` vaut exact ou normalized. React et le
+fallback HTML affichent le type, le code et la source correspondants, puis un lien
+vers le produit canonique. Les refus de publication et de prix restent appliqués.
+Une recherche inconnue reste sans écriture et propose le contact. Un texte ne
+contenant que des espaces retourne 422 avec une erreur sur `reference`.
+
+### Gestion protégée des références
+
+L'éditeur React est à `/gestion/produits/{id}/references`. Il utilise la session
+existante, CSRF et la capacité serveur `REFERENCE_MANAGE` ; un client suspendu
+reste refusé. Cette capacité doit être fournie par le véritable module de
+permissions : aucune gate permissive, compte spécial ou identifiant publié
+n'est ajouté par FTP-17. Les tests autorisés utilisent des permissions de test ;
+ils ne valident pas le raccordement réel des rôles FTP-13.
+
+```http
+GET    /api/v1/products/{id}/references
+POST   /api/v1/products/{id}/references
+PUT    /api/v1/products/{id}/references/{referenceId}
+PATCH  /api/v1/products/{id}/references/{referenceId}/verification
+DELETE /api/v1/products/{id}/references/{referenceId}
+PUT    /api/v1/products/{id}/original-reference
+```
+
+POST accepte `{"reference":"0343012","brand":"Source connue"}` ; la source
+est facultative. Une nouvelle association reste à vérifier. Une répétition
+équivalente pour le même produit et la même source retourne l'association
+existante (200 au lieu de 201), sans modifier son texte ni répéter l'audit.
+
+PUT d'une référence croisée ajoute `"version":1` aux champs ci-dessus. PATCH de
+vérification et DELETE exigent eux aussi `{"version":1}` : c'est une évolution
+du PATCH de vérification FTP-16, dont les clients doivent désormais transmettre
+la version reçue par GET. Une version périmée retourne 409. Modifier le code ou
+sa source incrémente sa version et retire sa vérification ; une vérification
+répétée de la même version conserve sa date et ne répète pas l'audit.
+
+PUT de la référence originale accepte
+`{"reference":"CR F 200028","expected_reference":"ANCIEN CODE"}`. Un ancien
+texte périmé retourne 409. Les changements de références via l'ancienne mise à
+jour produit ou `/logistics` demandent également REFERENCE_MANAGE ; les seules
+permissions descriptives ne permettent pas de contourner ce contrôle.
+
+Une association d'un autre produit retourne 404. Les champs injectés, notamment
+verified_at, product_id ou une clé calculée, sont refusés. Ajouts, modifications,
+vérifications et suppressions sont audités dans la même transaction, avec auteur,
+sans prix ni secret. Une erreur d'audit annule l'écriture. La suppression demande
+une confirmation nommant le code dans l'interface et conserve le produit.
+
+### Exemples du cahier et limites d'intégration
+
+Le jeu local facultatif crée les exemples du moyeu, du manchon et une collision
+`PARTAGE-FTP17` entre deux produits publiés, plus un brouillon et une archive :
+
+```sh
+docker compose exec --user www-data ftp php artisan db:seed --class=ReferenceSearchDemoSeeder --no-interaction
+```
+
+```http
+GET /api/v1/catalogue/products?reference=CR%20F%20200028
+GET /api/v1/catalogue/products?reference=0343012
+GET /api/v1/catalogue/products?reference=03%20434%203010%2000
+GET /api/v1/catalogue/products?reference=200028
+GET /api/v1/catalogue/products?reference=566830.H195
+GET /api/v1/catalogue/products?reference=SET%201372
+GET /api/v1/catalogue/products?reference=PARTAGE-FTP17&per_page=1
+```
+
+Les cinq produits `FTP17-DEMO-*` et leurs références sont fictifs. Aucun compte,
+droit ou stock n'est créé. La recherche ne filtre pas selon le stock et retrouve
+aussi un produit sans inventaire. Le module de stock FTP-24 et la politique de
+visibilité des disponibilités ne sont pas encore intégrés : l'affichage réel
+d'un disponible zéro et le scénario REC44 restent à vérifier avec cette source.
+Ne pas interpréter l'absence de stock renseigné comme une quantité zéro ou une
+disponibilité garantie. Le raccordement réel de REFERENCE_MANAGE reste également
+nécessaire avant une recette complète de la gestion des références.
+
+## Promotions et prix clients — FTP-18
+
+Décisions confirmées par Khalid le 4 novembre 2026 : MAD actuellement, meilleur
+prix entre promotion et remise client **sans cumul**, fuseau Africa/Casablanca,
+fenêtre `[début, fin[`, aucun chevauchement de promotions activées pour le même
+produit et offre arrondie strictement inférieure au tarif normal. HT/TTC est un
+choix configurable, initialement non précisé ; aucun taux, calcul de TVA ni
+conversion de devise n'est ajouté. Les prix restent saisis par les personnes
+habilitées. Les calculs de remise utilisent les unités mineures entières, deux
+décimales et l'arrondi au plus proche avec demi-unité vers le haut ; aucun calcul
+monétaire PHP en flottants. Exemple : 100.00, offre 80.00, remise client 10 % →
+80.00 ; avec remise client 30 % → 70.00. Une remise de 100 % peut donner 0.00.
+
+### Contrat de prix v1
+
+Le catalogue, les recherches, les détails et la liste des promotions consomment
+le même service `CustomerPricing`. Pour un client réellement authentifié et
+approuvé, `sale_price` représente désormais le **prix effectif**, en chaîne
+décimale ; la colonne catalogue n'est jamais réécrite par une lecture. Le nouvel
+objet `pricing` donne aussi le tarif de base, la provenance et la validité :
+
+```json
+{
+  "schema_version": 1,
+  "policy_version": "ftp18-v1",
+  "status": "ready",
+  "product_id": "10",
+  "currency": "MAD",
+  "tax_basis": null,
+  "base_unit_price": "100.00",
+  "unit_price": "80.00",
+  "applied_source": "promotion",
+  "promotion": {"id":"UUID", "title":"Offre", "unit_price":"80.00", "version":1,
+    "starts_at":"2026-11-05T08:00:00+00:00", "ends_at":"2026-11-05T09:00:00+00:00"},
+  "customer_discount_percentage": "10.00",
+  "calculated_at": "2026-11-05T08:30:00+00:00",
+  "valid_until": "2026-11-05T09:00:00+00:00",
+  "fingerprint": "SHA256_DES_CONDITIONS"
+}
+```
+
+`applied_source` vaut catalogue, promotion ou customer_discount. Un tarif de base
+manquant ou des offres concurrentes incohérentes donnent respectivement
+`missing_base_price` ou `conflicting_promotions`, avec `unit_price: null` : ce
+n'est pas un prix zéro. Brouillons, archives, coûts d'achat et données d'autres
+clients restent exclus des réponses publiques. Une suspension/retrait
+d'approbation masque immédiatement prix et conditions aux requêtes suivantes.
+
+```http
+GET /api/v1/me/promotions?page=1&per_page=20
+GET /api/v1/me/products/10/price
+GET /api/v1/me/products/10/price?previous_fingerprint=SHA256_PRECEDENT
+```
+
+Le dernier GET retourne `data`, `changed` et un message de revalidation. Le
+fingerprint sert à détecter un changement, jamais à autoriser un prix fourni par
+le navigateur. Le serveur recalcule toujours. Les listes incluent
+`refresh_after_ms` ; React actualise aux bornes connues et au maximum toutes les
+60 secondes, ainsi qu'au retour sur la page. Les fiches disposent aussi d'un
+bouton d'actualisation ; après erreur, un ancien tarif n'est pas présenté comme
+actuel. L'espace client `/promotions` et son API exigent une session approuvée.
+
+**Panier et commandes :** FTP-19 et FTP-20 ne sont pas présents dans develop au
+moment de cette livraison. Le propriétaire du panier doit remplacer sa lecture
+directe du tarif catalogue par `CustomerPricing::quotes($products, $actor)`, ou
+l'API personnelle, puis comparer les fingerprints avant poursuite. À l'accord,
+le propriétaire de la commande doit relire/verrouiller les produits et conserver
+le résultat monétaire et ses conditions comme instantané historique dans sa
+transaction. Une commande acceptée doit utiliser cet instantané ensuite, sans
+rappeler le tarif courant pour réécrire son prix. FTP-18 ne crée aucune fausse
+commande acceptée ni ne modifie les tables de vente ; l'expiration/reprise d'un
+panier réel et la conservation d'une vraie commande restent des validations
+d'intégration à réaliser avec leurs modules.
+
+### Gestion et permissions
+
+L'éditeur React `/gestion/promotions` gère recherche du produit, tarif de base si
+habilité, brouillons, activation/désactivation, dates et édition avec version.
+`/gestion/remises-clients` gère les pourcentages individuels. Les capacités
+serveur sont distinctes :
+
+| Action | Capacité |
+| --- | --- |
+| Consulter et gérer les offres, lire leurs produits/tarifs de base | PROMOTION_MANAGE |
+| Modifier un tarif catalogue | PRODUCT_PRICE_UPDATE |
+| Consulter et modifier les remises clients | CUSTOMER_TERMS_MANAGE |
+| Déclarer HT/TTC pour les montants saisis | SETTINGS_MANAGE |
+
+Aucun rôle ou compte permissif n'est ajouté. Le module de permissions FTP-13 doit
+fournir ces capacités réelles ; les tests positifs de gestion utilisent des Gates
+de test et ne constituent pas une validation de ce raccordement. Le choix HT/TTC
+décrit les montants saisis : il ne transforme pas automatiquement un ancien prix
+HT en TTC. Le fingerprint change ; les modules de vente doivent conserver la base fiscale
+d'origine avec leur instantané historique.
+
+```http
+GET  /api/v1/promotions?state=enabled&product_id=10&page=1&per_page=20
+GET  /api/v1/promotions/products?search=SKU_OU_REFERENCE_OU_DESIGNATION&page=1
+POST /api/v1/promotions
+PUT  /api/v1/promotions/{uuid}
+GET  /api/v1/promotions/settings
+PUT  /api/v1/promotions/settings
+GET  /api/v1/customer-discounts?search=CODE_OU_NOM&page=1
+PUT  /api/v1/customers/{customerProfileUuid}/discount
+```
+
+POST exige `Accept: application/json`, la session/CSRF et un en-tête
+`Idempotency-Key` UUID. Exemple de corps :
+
+```json
+{"product_id":"10","title":"Offre novembre","kind":"fixed_price","value":"80.00",
+ "starts_at":"2026-11-05T09:00","ends_at":"2026-11-05T10:00",
+ "timezone":"Africa/Casablanca","state":"enabled"}
+```
+
+`kind` accepte fixed_price ou percentage ; `value` est une chaîne décimale.
+`state` accepte draft, enabled ou disabled. Les dates entrantes sont des heures
+locales dans le fuseau donné ; elles sont validées puis stockées en UTC. Les
+heures inexistantes ou ambiguës lors d'un changement d'heure sont refusées, sans
+choix silencieux. L'activation exige le fuseau métier approuvé. Les dates
+sortantes sont ISO 8601 avec décalage ; starts_local/ends_local servent au
+formulaire. Une nouvelle tentative avec même acteur/clé/contenu retrouve la
+même offre (200 au lieu de 201) ; même clé avec un autre contenu → 409.
+
+PUT reprend les champs sauf product_id et ajoute `expected_version` reçu dans
+`version`. Version périmée → 409, saisie refusée → 422, absence de droit → 403,
+session absente → 401. Le produit d'une offre est immuable ; désactiver conserve
+la ligne et son audit, sans route de suppression. L'édition ne réécrit aucune
+commande historique. Les produits sont verrouillés pour sérialiser les offres
+concurrentes ; les reprises d'interblocage sont bornées à trois tentatives.
+
+Une modification du prix de base qui invaliderait une offre activée non expirée
+est refusée : corriger/désactiver d'abord cette offre. L'ancien PATCH
+`/api/v1/products/{id}/price` accepte en plus `expected_sale_price` (chaîne ou
+null), utilisé par l'interface pour détecter une modification concurrente. Les
+créations, modifications d'offre, tarifs, paramètres et remises sont auditées
+dans la même transaction ; une panne d'audit annule l'écriture. Les clés
+techniques d'idempotence et le coût d'achat ne sont pas exposés dans les DTOs.
+
+PUT settings accepte `{"tax_basis":"HT","expected_version":1}` (HT, TTC ou
+null). MAD est fixé pour cette version, sans accepter une devise injectée. PUT
+discount accepte `{"percentage":"12.50","expected_version":0}` : 0 signifie
+qu'aucune règle n'existait ; ensuite transmettre la version lue. Un pourcentage
+de 0 retire l'avantage aux prochains calculs. Aucun identifiant de client ni
+montant final ne peut être injecté pour modifier une autre règle.
+
+### Fixtures locales facultatives
+
+Hors production, ces fixtures identifiables ne représentent aucune offre réelle :
+
+```sh
+docker compose exec -T --user www-data -e FTP_PRICING_DEMO=1 ftp php artisan db:seed --class=PromotionSeeder --no-interaction
+```
+
+Elles créent cinq produits FTP18-DEMO-* (offre en cours, future, expirée,
+désactivée et produit non publié) et un auteur fictif sans permission interne.
+Elles peuvent être rejouées sans écraser les produits/offres existants. Aucun
+stock n'est créé. Pour tester le vrai login et le rendu client, ajouter
+`-e FTP_PRICING_DEMO_CUSTOMER=1` : un client fictif approuvé et sa remise de 10 %
+sont alors créés explicitement. Son mot de passe aléatoire reste uniquement dans
+`storage/app/private/ftp18-demo-access.json` (mode 0600), jamais dans le dépôt ou
+le README. Ce profil de fixture ne valide pas le processus administratif réel
+d'approbation ni les droits de gestion. `FTP_PRICING_DEMO_SECONDS` borne la durée
+de la nouvelle offre active (30 à 86400 secondes), sans réinitialiser une offre
+existante lors d'une reprise.
+
+
+Le moteur exige les règles IANA récentes de Casablanca (2026c ou ultérieures) :
+une base ancienne est refusée avec 503 plutôt qu'un décalage silencieux. L'image
+Docker vérifiée utilise timezonedb 2026.5 ; le PHP local de ce poste annonce
+2025.2 et doit donc utiliser Docker pour ces tests et les calculs de promotions.
+Aucune extension locale n'a été installée ni dépendance du projet modifiée.
+Source : [notes IANA 2026c](https://data.iana.org/time-zones/tzdb-2026c/NEWS).
+
+```sh
+docker compose exec -T -e APP_ENV=testing -e DB_CONNECTION=sqlite -e DB_DATABASE=:memory: -e DB_URL= -e SESSION_DRIVER=array -e CACHE_STORE=array -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array ftp vendor/bin/phpunit
+```

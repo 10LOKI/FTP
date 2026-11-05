@@ -2,7 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ProductReferenceVersionRequest;
 use App\Models\Product;
+use App\Rules\DecimalPrice;
+use App\Rules\ReferenceCode;
+use App\Services\PriceAmount;
+use App\Services\ProductReferenceManager;
+use App\Services\PromotionManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +17,8 @@ use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
+    public function __construct(private ProductReferenceManager $references, private PromotionManager $promotions) {}
+
     public function show(Product $product): JsonResponse
     {
         Gate::authorize('PRODUCT_UPDATE');
@@ -46,18 +54,9 @@ class ProductController extends Controller
         return response()->json(null, 204);
     }
 
-    public function verifyReference(Product $product, int $reference): JsonResponse
+    public function verifyReference(ProductReferenceVersionRequest $request, Product $product, int $reference): JsonResponse
     {
-        Gate::authorize('REFERENCE_MANAGE');
-
-        DB::transaction(function () use ($product, $reference): void {
-            Product::query()->lockForUpdate()->findOrFail($product->id);
-            $association = DB::table('product_cross_references')
-                ->where('product_id', $product->id)
-                ->where('id', $reference);
-            abort_unless($association->exists(), 404);
-            $association->whereNull('verified_at')->update(['verified_at' => now()]);
-        });
+        $this->references->verify($product, $reference, (int) $request->validated('version'), $request->user());
 
         return response()->json(null, 204);
     }
@@ -72,7 +71,17 @@ class ProductController extends Controller
     public function update(Request $request, Product $product): JsonResponse
     {
         Gate::authorize('PRODUCT_UPDATE');
-        $product->update($this->attributes($request));
+        $attributes = $this->attributes($request);
+        $product = DB::transaction(function () use ($product, $attributes, $request): Product {
+            $locked = Product::query()->lockForUpdate()->findOrFail($product->id);
+            if ($attributes['original_reference'] !== $locked->original_reference) {
+                $locked = $this->references->updateOriginal($locked, $attributes['original_reference'], $locked->original_reference, $request->user());
+            }
+            unset($attributes['original_reference']);
+            $locked->update($attributes);
+
+            return $locked;
+        });
 
         return response()->json($product);
     }
@@ -103,15 +112,14 @@ class ProductController extends Controller
             'references' => 'present|array',
             'references.*' => 'required|array:brand,reference',
             'references.*.brand' => 'required|string|max:100',
-            'references.*.reference' => 'required|string|max:120',
+            'references.*.reference' => ['required', 'string', 'max:120', new ReferenceCode],
         ]);
 
-        DB::transaction(function () use ($product, $validated): void {
+        DB::transaction(function () use ($product, $validated, $request): void {
             Product::query()->lockForUpdate()->findOrFail($product->id);
             foreach ([
                 'barcodes' => ['product_barcodes', ['barcode']],
                 'compatibilities' => ['product_compatibilities', ['vehicle_make', 'vehicle_model']],
-                'references' => ['product_cross_references', ['brand', 'reference']],
             ] as $key => [$table, $identity]) {
                 $existing = DB::table($table)->where('product_id', $product->id);
                 $retainedIds = [];
@@ -127,6 +135,7 @@ class ProductController extends Controller
                 }
                 $existing->whereNotIn('id', $retainedIds)->delete();
             }
+            $this->references->replace($product, $validated['references'], $request->user());
         });
 
         return response()->json(null, 204);
@@ -137,10 +146,24 @@ class ProductController extends Controller
         Gate::authorize('PRODUCT_PRICE_UPDATE');
         $validated = $request->validate([
             'sale_price' => 'required|numeric|min:0|max:9999999999.99|decimal:0,2',
+            'expected_sale_price' => ['sometimes', 'nullable', new DecimalPrice],
         ]);
 
-        $product->sale_price = $validated['sale_price'];
-        $product->save();
+        DB::transaction(function () use ($product, $validated, $request): void {
+            $locked = Product::query()->lockForUpdate()->findOrFail($product->id);
+            if (array_key_exists('expected_sale_price', $validated)) {
+                $expected = $validated['expected_sale_price'] === null ? null : PriceAmount::minorUnits($validated['expected_sale_price']);
+                $current = $locked->sale_price === null ? null : PriceAmount::minorUnits((string) $locked->sale_price);
+                abort_if($expected !== $current, 409, 'Le tarif de base a changé. Actualisez le produit.');
+            }
+            $before = ['product_id' => (string) $locked->id, 'sale_price' => $locked->sale_price];
+            $this->promotions->validateBasePriceChange($locked, (string) $validated['sale_price']);
+            $locked->sale_price = $validated['sale_price'];
+            if ($locked->isDirty('sale_price')) {
+                $locked->save();
+                $this->promotions->record($request->user(), 'pricing.base_price_updated', (string) $locked->id, $before, ['product_id' => (string) $locked->id, 'sale_price' => $locked->sale_price]);
+            }
+        });
 
         return response()->json(null, 204);
     }
@@ -150,7 +173,7 @@ class ProductController extends Controller
         return $request->validate([
             'sku' => $request->isMethod('POST') ? 'required|string|max:255|unique:products,sku' : 'prohibited',
             'designation' => 'required|string|max:255',
-            'original_reference' => 'required|string|max:255',
+            'original_reference' => ['required', 'string', 'max:255', new ReferenceCode],
             'part_brand' => 'sometimes|nullable|string|max:255',
             'category' => 'sometimes|nullable|string|max:255',
             'hs_code' => 'sometimes|nullable|string|max:255',

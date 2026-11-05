@@ -13,6 +13,19 @@ return [
     |
     */
 
+    'company' => [
+        'name' => env('COMPANY_NAME', 'Pièces Camions'),
+        'address' => env('COMPANY_ADDRESS'),
+        'hours' => env('COMPANY_HOURS'),
+        'email' => env('COMPANY_EMAIL'),
+        'phone' => env('COMPANY_PHONE'),
+        'presentation' => env('COMPANY_PRESENTATION'),
+        'services' => env('COMPANY_SERVICES'),
+        'logo_url' => env('COMPANY_LOGO_URL'),
+        'image_url' => env('COMPANY_IMAGE_URL'),
+        'legal_url' => env('COMPANY_LEGAL_URL'),
+    ],
+
     'name' => env('APP_NAME', 'Laravel'),
 
     /*

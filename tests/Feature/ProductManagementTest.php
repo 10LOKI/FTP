@@ -31,6 +31,7 @@ class ProductManagementTest extends TestCase
         $product = Product::factory()->create();
         $this->actingAs(User::factory()->create());
         Gate::define('PRODUCT_UPDATE', fn (User $user): bool => true);
+        Gate::define('REFERENCE_MANAGE', fn (User $user): bool => true);
 
         $this->putJson("/api/v1/products/{$product->id}", [
             'designation' => 'Updated filter',
@@ -54,6 +55,7 @@ class ProductManagementTest extends TestCase
         $other = Product::factory()->create();
         $this->actingAs(User::factory()->create());
         Gate::define('PRODUCT_UPDATE', fn (User $user): bool => true);
+        Gate::define('REFERENCE_MANAGE', fn (User $user): bool => true);
         $payload = [
             'barcodes' => [['barcode' => '000123', 'units_per_package' => 6]],
             'compatibilities' => [['vehicle_make' => 'Volvo', 'vehicle_model' => 'FH']],
@@ -82,6 +84,7 @@ class ProductManagementTest extends TestCase
         $this->getJson("$url/purchase-price")->assertOk()->assertJsonPath('net_purchase_price', 10.5);
         $this->patchJson("$url/price", ['sale_price' => '22.00'])->assertForbidden();
         Gate::define('PRODUCT_PRICE_UPDATE', fn (User $user): bool => true);
+        Gate::define('REFERENCE_MANAGE', fn (User $user): bool => true);
         $this->patchJson("$url/price", ['sale_price' => '22.00'])->assertNoContent();
         $this->assertDatabaseHas('products', ['id' => $product->id, 'sale_price' => '22.00']);
         $this->putJson($url, ['designation' => 'Filter', 'original_reference' => '0001'])
@@ -104,13 +107,13 @@ class ProductManagementTest extends TestCase
 
         $this->patchJson($url)->assertForbidden();
         Gate::define('REFERENCE_MANAGE', fn (User $user): bool => true);
-        $this->patchJson("/api/v1/products/{$other->id}/references/$reference/verification")->assertNotFound();
+        $this->patchJson("/api/v1/products/{$other->id}/references/$reference/verification", ['version' => 1])->assertNotFound();
         $this->assertDatabaseHas('product_cross_references', ['id' => $reference, 'verified_at' => null]);
-        $this->patchJson($url)->assertNoContent();
+        $this->patchJson($url, ['version' => 1])->assertNoContent();
         $verifiedAt = DB::table('product_cross_references')->where('id', $reference)->value('verified_at');
         $this->assertNotNull($verifiedAt);
         $this->travel(1)->minute();
-        $this->patchJson($url)->assertNoContent();
+        $this->patchJson($url, ['version' => 1])->assertNoContent();
         $this->assertDatabaseHas('product_cross_references', ['id' => $reference, 'verified_at' => $verifiedAt]);
     }
 

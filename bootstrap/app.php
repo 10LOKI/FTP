@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [EnsureEmployeeSession::class]);
         $middleware->api(append: [EnsureEmployeeSession::class]);
         $middleware->prependToPriorityList(SubstituteBindings::class, EnsureEmployeeSession::class);
+        $middleware->trimStrings(except: ['original_reference', 'reference', 'references.*.reference', 'expected_reference']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
