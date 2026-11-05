@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\ProductController;
@@ -21,6 +22,8 @@ Route::post('/contact', [PublicContactController::class, 'store'])
     ->middleware('throttle:5,1')->name('public.contact.store');
 Route::get('/gestion/produits/{product}/references', [ProductReferenceController::class, 'edit'])
     ->middleware(['auth', EnsureCustomerApproved::class])->name('product.references.edit');
+
+Route::get('/panier', [CartController::class, 'page'])->middleware(['auth', EnsureCustomerApproved::class])->name('cart.page');
 
 Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/{product}', [ProductController::class, 'show']);

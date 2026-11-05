@@ -86,7 +86,12 @@ class PublicCatalogueController extends Controller
 
     public function detail(int $product): View
     {
-        return view('public-product', ['product' => $this->productDetail($product)]);
+        return view('public-product', [
+            'product' => $this->productDetail($product),
+            'cartPackagings' => Gate::allows('CART_MANAGE_OWN')
+                ? DB::table('product_barcodes')->where('product_id', $product)->distinct()->orderBy('units_per_package')->pluck('units_per_package')
+                : collect(),
+        ]);
     }
 
     private function paginate(Request $request, bool $promotionsOnly = false): LengthAwarePaginator

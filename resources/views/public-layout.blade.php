@@ -49,6 +49,9 @@
         @endif
         <a href="{{ route('public.home') }}">Accueil</a>
         <a href="{{ route('public.catalogue') }}">Catalogue</a>
+        @can('CART_MANAGE_OWN')
+            <a href="{{ route('cart.page') }}">Mon panier</a>
+        @endcan
         <a href="{{ route('public.contact') }}">Contact</a>
         @can('catalogue-view-sale-price') <a href="{{ route('customer.promotions') }}">Promotions</a> @endcan
         @can('PROMOTION_MANAGE') <a href="{{ route('promotions.manage') }}">Gérer les promotions</a> @endcan
