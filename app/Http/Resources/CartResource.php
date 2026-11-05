@@ -22,7 +22,7 @@ class CartResource extends JsonResource
             'pricing_status' => $this->resource['pricing_status'],
             'totals' => $this->resource['totals'],
             'pricing_token' => CartService::pricingToken($this->resource),
-            'checkout_ready' => false,
+            'checkout_ready' => $this->resource['lines'] !== [] && $this->resource['pricing_status'] === 'customer_estimate',
         ];
     }
 }

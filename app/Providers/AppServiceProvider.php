@@ -34,6 +34,10 @@ class AppServiceProvider extends ServiceProvider
                 ->by('customer-commerce:'.($readOnly ? 'read:' : 'write:').$actor);
         });
 
+        Gate::define('ORDER_SUBMIT_OWN', fn (User $user): bool => CustomerProfile::query()
+            ->where('user_id', $user->getAuthIdentifier())
+            ->where('approval', 'APPROUVE')->exists());
+
         Gate::define('CART_MANAGE_OWN', fn (User $user): bool => CustomerProfile::query()
             ->where('user_id', $user->getAuthIdentifier())
             ->where('approval', 'APPROUVE')->exists());

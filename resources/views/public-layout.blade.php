@@ -51,6 +51,7 @@
         <a href="{{ route('public.catalogue') }}">Catalogue</a>
         @can('CART_MANAGE_OWN')
             <a href="{{ route('cart.page') }}">Mon panier</a>
+            <a href="{{ route('customer.orders.page') }}">Mes commandes</a>
         @endcan
         <a href="{{ route('public.contact') }}">Contact</a>
         @can('catalogue-view-sale-price') <a href="{{ route('customer.promotions') }}">Promotions</a> @endcan
