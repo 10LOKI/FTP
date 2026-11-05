@@ -12,6 +12,9 @@ class EnsureCustomerApproved
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
+        if ($user?->must_change_password) {
+            return response()->json(['code' => 'PASSWORD_CHANGE_REQUIRED', 'message' => 'Change your temporary password before business access.'], 403);
+        }
         $profile = $user === null ? null : CustomerProfile::where('user_id', $user->getAuthIdentifier())->first();
 
         if ($profile !== null && $profile->approval !== 'APPROUVE') {

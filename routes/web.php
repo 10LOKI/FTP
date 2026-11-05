@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CustomerSessionController;
+use App\Http\Controllers\EmployeeSessionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Support\Facades\Route;
@@ -23,4 +24,9 @@ Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::cl
 });
 
 Route::post('/api/v1/login', [CustomerSessionController::class, 'store'])->middleware('throttle:customer-login');
-Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum');
+Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum')->name('account.logout');
+
+Route::post('/api/v1/employee-login', [EmployeeSessionController::class, 'store'])
+    ->middleware('throttle:employee-login');
+Route::post('/api/v1/temporary-password', [EmployeeSessionController::class, 'replacePassword'])
+    ->middleware(['auth:sanctum', 'throttle:temporary-password'])->name('employee.password.replace');
