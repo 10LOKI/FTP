@@ -9,3 +9,5 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('customers:send-approval-notifications')->everyMinute()->withoutOverlapping();
+
+Schedule::command('employees:send-access')->everyMinute()->withoutOverlapping();

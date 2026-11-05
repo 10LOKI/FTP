@@ -4,6 +4,7 @@ use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
+use App\Http\Controllers\EmployeeSessionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PromotionController;
@@ -48,6 +49,12 @@ Route::prefix('api/v1/products')->middleware(['auth', EnsureCustomerApproved::cl
 });
 
 Route::post('/api/v1/login', [CustomerSessionController::class, 'store'])->middleware('throttle:customer-login');
+Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum')->name('account.logout');
+
+Route::post('/api/v1/employee-login', [EmployeeSessionController::class, 'store'])
+    ->middleware('throttle:employee-login');
+Route::post('/api/v1/temporary-password', [EmployeeSessionController::class, 'replacePassword'])
+    ->middleware(['auth:sanctum', 'throttle:temporary-password'])->name('employee.password.replace');
 Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum');
 
 Route::get('/api/v1/catalogue/products', [PublicCatalogueController::class, 'index'])->name('public.products.index');

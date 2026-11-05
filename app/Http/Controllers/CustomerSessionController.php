@@ -42,6 +42,12 @@ class CustomerSessionController extends Controller
             return response()->json(['code' => 'INVALID_CREDENTIALS', 'message' => 'Identifiants invalides.'], 401);
         }
 
+        if ($profile->user->must_change_password) {
+            $this->recordLogin($profile, 'REFUSED', 'password_change_required');
+
+            return response()->json(['code' => 'PASSWORD_CHANGE_REQUIRED', 'message' => 'Use the temporary access flow to replace your password.'], 403);
+        }
+
         if ($profile->approval !== 'APPROUVE') {
             $this->recordLogin($profile, 'REFUSED', 'account_not_approved');
 
@@ -61,6 +67,9 @@ class CustomerSessionController extends Controller
         try {
             Auth::guard('web')->login($profile->user);
             $request->session()->regenerate();
+            if ($profile->user->access_version > 0) {
+                $request->session()->put('employee_access_version', $profile->user->access_version);
+            }
             $this->recordLogin($profile, 'SUCCESS', 'session_opened');
         } catch (Throwable $exception) {
             $this->closeSession($request);

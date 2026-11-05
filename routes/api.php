@@ -6,6 +6,9 @@ use App\Http\Controllers\CustomerApprovalDecisionController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerRegistrationController;
 use App\Http\Controllers\CustomerReviewController;
+use App\Http\Controllers\EmployeeAccessResetController;
+use App\Http\Controllers\EmployeeProvisioningController;
+use App\Http\Controllers\RoleCatalogController;
 use App\Http\Middleware\AuditCartRequest;
 use App\Http\Middleware\AuditCustomerApprovalDecision;
 use App\Http\Middleware\AuditCustomerOrderRequest;
@@ -45,3 +48,14 @@ Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:CUSTOMER_
 
 Route::get('/v1/customer-account', CustomerAccountController::class)
     ->middleware(['auth:sanctum', EnsureCustomerApproved::class]);
+
+Route::get('/v1/roles', RoleCatalogController::class)
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:USER_ASSIGN_ROLE']);
+
+Route::post('/v1/users', [EmployeeProvisioningController::class, 'store'])
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:USER_CREATE', 'can:USER_ASSIGN_ROLE']);
+Route::get('/v1/employee-access-deliveries/{delivery}', [EmployeeProvisioningController::class, 'show'])
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:USER_RESET_ACCESS']);
+
+Route::post('/v1/users/{user}/access-resets', EmployeeAccessResetController::class)
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:USER_RESET_ACCESS']);
