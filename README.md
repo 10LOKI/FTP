@@ -329,3 +329,181 @@ d'un disponible zéro et le scénario REC44 restent à vérifier avec cette sour
 Ne pas interpréter l'absence de stock renseigné comme une quantité zéro ou une
 disponibilité garantie. Le raccordement réel de REFERENCE_MANAGE reste également
 nécessaire avant une recette complète de la gestion des références.
+
+## Promotions et prix clients — FTP-18
+
+Décisions confirmées par Khalid le 4 novembre 2026 : MAD actuellement, meilleur
+prix entre promotion et remise client **sans cumul**, fuseau Africa/Casablanca,
+fenêtre `[début, fin[`, aucun chevauchement de promotions activées pour le même
+produit et offre arrondie strictement inférieure au tarif normal. HT/TTC est un
+choix configurable, initialement non précisé ; aucun taux, calcul de TVA ni
+conversion de devise n'est ajouté. Les prix restent saisis par les personnes
+habilitées. Les calculs de remise utilisent les unités mineures entières, deux
+décimales et l'arrondi au plus proche avec demi-unité vers le haut ; aucun calcul
+monétaire PHP en flottants. Exemple : 100.00, offre 80.00, remise client 10 % →
+80.00 ; avec remise client 30 % → 70.00. Une remise de 100 % peut donner 0.00.
+
+### Contrat de prix v1
+
+Le catalogue, les recherches, les détails et la liste des promotions consomment
+le même service `CustomerPricing`. Pour un client réellement authentifié et
+approuvé, `sale_price` représente désormais le **prix effectif**, en chaîne
+décimale ; la colonne catalogue n'est jamais réécrite par une lecture. Le nouvel
+objet `pricing` donne aussi le tarif de base, la provenance et la validité :
+
+```json
+{
+  "schema_version": 1,
+  "policy_version": "ftp18-v1",
+  "status": "ready",
+  "product_id": "10",
+  "currency": "MAD",
+  "tax_basis": null,
+  "base_unit_price": "100.00",
+  "unit_price": "80.00",
+  "applied_source": "promotion",
+  "promotion": {"id":"UUID", "title":"Offre", "unit_price":"80.00", "version":1,
+    "starts_at":"2026-11-05T08:00:00+00:00", "ends_at":"2026-11-05T09:00:00+00:00"},
+  "customer_discount_percentage": "10.00",
+  "calculated_at": "2026-11-05T08:30:00+00:00",
+  "valid_until": "2026-11-05T09:00:00+00:00",
+  "fingerprint": "SHA256_DES_CONDITIONS"
+}
+```
+
+`applied_source` vaut catalogue, promotion ou customer_discount. Un tarif de base
+manquant ou des offres concurrentes incohérentes donnent respectivement
+`missing_base_price` ou `conflicting_promotions`, avec `unit_price: null` : ce
+n'est pas un prix zéro. Brouillons, archives, coûts d'achat et données d'autres
+clients restent exclus des réponses publiques. Une suspension/retrait
+d'approbation masque immédiatement prix et conditions aux requêtes suivantes.
+
+```http
+GET /api/v1/me/promotions?page=1&per_page=20
+GET /api/v1/me/products/10/price
+GET /api/v1/me/products/10/price?previous_fingerprint=SHA256_PRECEDENT
+```
+
+Le dernier GET retourne `data`, `changed` et un message de revalidation. Le
+fingerprint sert à détecter un changement, jamais à autoriser un prix fourni par
+le navigateur. Le serveur recalcule toujours. Les listes incluent
+`refresh_after_ms` ; React actualise aux bornes connues et au maximum toutes les
+60 secondes, ainsi qu'au retour sur la page. Les fiches disposent aussi d'un
+bouton d'actualisation ; après erreur, un ancien tarif n'est pas présenté comme
+actuel. L'espace client `/promotions` et son API exigent une session approuvée.
+
+**Panier et commandes :** FTP-19 et FTP-20 ne sont pas présents dans develop au
+moment de cette livraison. Le propriétaire du panier doit remplacer sa lecture
+directe du tarif catalogue par `CustomerPricing::quotes($products, $actor)`, ou
+l'API personnelle, puis comparer les fingerprints avant poursuite. À l'accord,
+le propriétaire de la commande doit relire/verrouiller les produits et conserver
+le résultat monétaire et ses conditions comme instantané historique dans sa
+transaction. Une commande acceptée doit utiliser cet instantané ensuite, sans
+rappeler le tarif courant pour réécrire son prix. FTP-18 ne crée aucune fausse
+commande acceptée ni ne modifie les tables de vente ; l'expiration/reprise d'un
+panier réel et la conservation d'une vraie commande restent des validations
+d'intégration à réaliser avec leurs modules.
+
+### Gestion et permissions
+
+L'éditeur React `/gestion/promotions` gère recherche du produit, tarif de base si
+habilité, brouillons, activation/désactivation, dates et édition avec version.
+`/gestion/remises-clients` gère les pourcentages individuels. Les capacités
+serveur sont distinctes :
+
+| Action | Capacité |
+| --- | --- |
+| Consulter et gérer les offres, lire leurs produits/tarifs de base | PROMOTION_MANAGE |
+| Modifier un tarif catalogue | PRODUCT_PRICE_UPDATE |
+| Consulter et modifier les remises clients | CUSTOMER_TERMS_MANAGE |
+| Déclarer HT/TTC pour les montants saisis | SETTINGS_MANAGE |
+
+Aucun rôle ou compte permissif n'est ajouté. Le module de permissions FTP-13 doit
+fournir ces capacités réelles ; les tests positifs de gestion utilisent des Gates
+de test et ne constituent pas une validation de ce raccordement. Le choix HT/TTC
+décrit les montants saisis : il ne transforme pas automatiquement un ancien prix
+HT en TTC. Le fingerprint change ; les modules de vente doivent conserver la base fiscale
+d'origine avec leur instantané historique.
+
+```http
+GET  /api/v1/promotions?state=enabled&product_id=10&page=1&per_page=20
+GET  /api/v1/promotions/products?search=SKU_OU_REFERENCE_OU_DESIGNATION&page=1
+POST /api/v1/promotions
+PUT  /api/v1/promotions/{uuid}
+GET  /api/v1/promotions/settings
+PUT  /api/v1/promotions/settings
+GET  /api/v1/customer-discounts?search=CODE_OU_NOM&page=1
+PUT  /api/v1/customers/{customerProfileUuid}/discount
+```
+
+POST exige `Accept: application/json`, la session/CSRF et un en-tête
+`Idempotency-Key` UUID. Exemple de corps :
+
+```json
+{"product_id":"10","title":"Offre novembre","kind":"fixed_price","value":"80.00",
+ "starts_at":"2026-11-05T09:00","ends_at":"2026-11-05T10:00",
+ "timezone":"Africa/Casablanca","state":"enabled"}
+```
+
+`kind` accepte fixed_price ou percentage ; `value` est une chaîne décimale.
+`state` accepte draft, enabled ou disabled. Les dates entrantes sont des heures
+locales dans le fuseau donné ; elles sont validées puis stockées en UTC. Les
+heures inexistantes ou ambiguës lors d'un changement d'heure sont refusées, sans
+choix silencieux. L'activation exige le fuseau métier approuvé. Les dates
+sortantes sont ISO 8601 avec décalage ; starts_local/ends_local servent au
+formulaire. Une nouvelle tentative avec même acteur/clé/contenu retrouve la
+même offre (200 au lieu de 201) ; même clé avec un autre contenu → 409.
+
+PUT reprend les champs sauf product_id et ajoute `expected_version` reçu dans
+`version`. Version périmée → 409, saisie refusée → 422, absence de droit → 403,
+session absente → 401. Le produit d'une offre est immuable ; désactiver conserve
+la ligne et son audit, sans route de suppression. L'édition ne réécrit aucune
+commande historique. Les produits sont verrouillés pour sérialiser les offres
+concurrentes ; les reprises d'interblocage sont bornées à trois tentatives.
+
+Une modification du prix de base qui invaliderait une offre activée non expirée
+est refusée : corriger/désactiver d'abord cette offre. L'ancien PATCH
+`/api/v1/products/{id}/price` accepte en plus `expected_sale_price` (chaîne ou
+null), utilisé par l'interface pour détecter une modification concurrente. Les
+créations, modifications d'offre, tarifs, paramètres et remises sont auditées
+dans la même transaction ; une panne d'audit annule l'écriture. Les clés
+techniques d'idempotence et le coût d'achat ne sont pas exposés dans les DTOs.
+
+PUT settings accepte `{"tax_basis":"HT","expected_version":1}` (HT, TTC ou
+null). MAD est fixé pour cette version, sans accepter une devise injectée. PUT
+discount accepte `{"percentage":"12.50","expected_version":0}` : 0 signifie
+qu'aucune règle n'existait ; ensuite transmettre la version lue. Un pourcentage
+de 0 retire l'avantage aux prochains calculs. Aucun identifiant de client ni
+montant final ne peut être injecté pour modifier une autre règle.
+
+### Fixtures locales facultatives
+
+Hors production, ces fixtures identifiables ne représentent aucune offre réelle :
+
+```sh
+docker compose exec -T --user www-data -e FTP_PRICING_DEMO=1 ftp php artisan db:seed --class=PromotionSeeder --no-interaction
+```
+
+Elles créent cinq produits FTP18-DEMO-* (offre en cours, future, expirée,
+désactivée et produit non publié) et un auteur fictif sans permission interne.
+Elles peuvent être rejouées sans écraser les produits/offres existants. Aucun
+stock n'est créé. Pour tester le vrai login et le rendu client, ajouter
+`-e FTP_PRICING_DEMO_CUSTOMER=1` : un client fictif approuvé et sa remise de 10 %
+sont alors créés explicitement. Son mot de passe aléatoire reste uniquement dans
+`storage/app/private/ftp18-demo-access.json` (mode 0600), jamais dans le dépôt ou
+le README. Ce profil de fixture ne valide pas le processus administratif réel
+d'approbation ni les droits de gestion. `FTP_PRICING_DEMO_SECONDS` borne la durée
+de la nouvelle offre active (30 à 86400 secondes), sans réinitialiser une offre
+existante lors d'une reprise.
+
+
+Le moteur exige les règles IANA récentes de Casablanca (2026c ou ultérieures) :
+une base ancienne est refusée avec 503 plutôt qu'un décalage silencieux. L'image
+Docker vérifiée utilise timezonedb 2026.5 ; le PHP local de ce poste annonce
+2025.2 et doit donc utiliser Docker pour ces tests et les calculs de promotions.
+Aucune extension locale n'a été installée ni dépendance du projet modifiée.
+Source : [notes IANA 2026c](https://data.iana.org/time-zones/tzdb-2026c/NEWS).
+
+```sh
+docker compose exec -T -e APP_ENV=testing -e DB_CONNECTION=sqlite -e DB_DATABASE=:memory: -e DB_URL= -e SESSION_DRIVER=array -e CACHE_STORE=array -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array ftp vendor/bin/phpunit
+```
