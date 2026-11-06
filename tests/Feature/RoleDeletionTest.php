@@ -37,7 +37,7 @@ class RoleDeletionTest extends TestCase
         $this->role->permissions()->attach($permission->id);
         $this->getJson($this->url().'/deletion-preview')->assertOk()->assertJsonPath('data.can_delete', true)
             ->assertJsonPath('data.assigned_accounts', 0)->assertJsonPath('data.version', 1);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
         $this->deleteJson($this->url(), $this->payload())->assertNoContent();
         $this->assertDatabaseMissing('roles', ['id' => $this->role->id]);
         $this->assertDatabaseHas('permissions', ['id' => $permission->id]);
@@ -49,7 +49,7 @@ class RoleDeletionTest extends TestCase
         $this->assertSame([$permission->code], $event->changes['before']['permissions']);
         $this->assertNull($event->changes['after']);
         $this->deleteJson($this->url(), $this->payload())->assertNotFound();
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_protected_role_is_refused(): void
@@ -67,7 +67,7 @@ class RoleDeletionTest extends TestCase
         $this->getJson($this->url().'/deletion-preview')->assertOk()->assertJsonPath('data.can_delete', false)
             ->assertJsonPath('data.assigned_accounts', 1);
         $this->deleteJson($this->url(), $this->payload())->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
         $this->assertDatabaseHas('user_roles', ['role_id' => $this->role->id, 'user_id' => $user->id]);
     }
 
@@ -76,7 +76,7 @@ class RoleDeletionTest extends TestCase
         $this->getJson($this->url().'/deletion-preview')->assertOk()->assertJsonPath('data.can_delete', true);
         $this->role->users()->attach($this->actor->id, ['assigned_by' => $this->actor->id, 'assigned_at' => now()]);
         $this->deleteJson($this->url(), $this->payload())->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_protected_permission_links_are_preserved(): void
@@ -95,7 +95,7 @@ class RoleDeletionTest extends TestCase
         $this->deleteJson($this->url(), [...$this->payload(), 'force' => true])->assertUnprocessable();
         $this->role->forceFill(['version' => 2])->save();
         $this->deleteJson($this->url(), $this->payload())->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_reassignment_then_fresh_request_allows_deletion(): void
@@ -117,7 +117,7 @@ class RoleDeletionTest extends TestCase
         $this->getJson($this->url().'/deletion-preview')->assertForbidden();
         $this->app['auth']->forgetGuards();
         $this->deleteJson($this->url(), $this->payload())->assertUnauthorized();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_audit_failure_rolls_back_role_and_permission_links(): void
@@ -138,7 +138,7 @@ class RoleDeletionTest extends TestCase
         }
         $this->assertDatabaseHas('roles', ['id' => $this->role->id]);
         $this->assertDatabaseHas('role_permissions', ['role_id' => $this->role->id, 'permission_id' => $permission->id]);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     /** @return array{version: int, confirmed: bool} */

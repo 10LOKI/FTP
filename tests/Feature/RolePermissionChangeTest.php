@@ -51,7 +51,7 @@ class RolePermissionChangeTest extends TestCase
         $this->assertStringNotContainsString($payload['confirmation_token'], $event->toJson());
         $this->assertStringNotContainsString($this->actor->password, $event->toJson());
         $this->putJson($this->url($this->role), $payload)->assertConflict();
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     #[DataProvider('missingAdministratorCapability')]
@@ -63,7 +63,7 @@ class RolePermissionChangeTest extends TestCase
         $this->assertTrue(Gate::forUser($this->actor)->allows('ROLE_MANAGE'));
         $this->assertTrue(Gate::forUser($this->actor)->allows('USER_ASSIGN_ROLE'));
         $this->assertSame(1, $role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     /** @return array<string, array{list<string>}> */
@@ -78,7 +78,7 @@ class RolePermissionChangeTest extends TestCase
         $this->grant($backup, ['USER_ASSIGN_ROLE']);
         $role = $this->actor->roles()->sole();
         $this->putJson($this->url($role), $this->preview($role, ['ROLE_MANAGE']))->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_another_usable_administrator_allows_removing_own_management_access(): void
@@ -89,7 +89,7 @@ class RolePermissionChangeTest extends TestCase
         $this->putJson($this->url($role), $this->preview($role, ['USER_ASSIGN_ROLE']))->assertOk();
         $this->assertFalse(Gate::forUser($this->actor)->allows('ROLE_MANAGE'));
         $this->assertTrue(Gate::forUser($backup)->allows('ROLE_MANAGE'));
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_administrator_permissions_can_be_combined_across_roles_on_the_same_person(): void
@@ -109,7 +109,7 @@ class RolePermissionChangeTest extends TestCase
         $this->grant($backup, ['ROLE_MANAGE', 'USER_ASSIGN_ROLE']);
         $role = $this->actor->roles()->sole();
         $this->putJson($this->url($role), $this->preview($role, []))->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_unapproved_customer_backup_does_not_count_as_usable(): void
@@ -118,7 +118,7 @@ class RolePermissionChangeTest extends TestCase
         $this->grant($backup->user, ['ROLE_MANAGE', 'USER_ASSIGN_ROLE']);
         $role = $this->actor->roles()->sole();
         $this->putJson($this->url($role), $this->preview($role, []))->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_protected_permission_cannot_be_removed_or_added(): void
@@ -128,7 +128,7 @@ class RolePermissionChangeTest extends TestCase
         $this->putJson($this->url($this->role), $this->preview($this->role, []))->assertConflict();
         $this->role->permissions()->detach($permission->id);
         $this->putJson($this->url($this->role), $this->preview($this->role, ['USER_CREATE']))->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_changed_proposal_or_membership_requires_a_new_preview(): void
@@ -140,7 +140,7 @@ class RolePermissionChangeTest extends TestCase
         $this->role->users()->attach($this->actor->id, ['assigned_by' => $this->actor->id, 'assigned_at' => now()]);
         $this->putJson($this->url($this->role), $payload)->assertConflict();
         $this->assertSame(1, $this->role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_missing_tampered_or_expired_confirmation_is_rejected(): void
@@ -155,14 +155,14 @@ class RolePermissionChangeTest extends TestCase
         $this->putJson($this->url($this->role), $tampered)->assertUnprocessable();
         $this->travel(10)->minutes();
         $this->putJson($this->url($this->role), $payload)->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_an_unchanged_confirmation_is_a_no_op(): void
     {
         $payload = $this->preview($this->role, ['USER_CREATE']);
         $this->putJson($this->url($this->role), $payload)->assertOk()->assertJsonPath('data.version', 1);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_revoked_actor_cannot_apply_an_existing_preview(): void
@@ -170,7 +170,7 @@ class RolePermissionChangeTest extends TestCase
         $payload = $this->preview($this->role, []);
         $this->actor->roles()->detach();
         $this->putJson($this->url($this->role), $payload)->assertForbidden();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_temporary_actor_cannot_apply_an_existing_preview(): void
@@ -178,7 +178,7 @@ class RolePermissionChangeTest extends TestCase
         $payload = $this->preview($this->role, []);
         $this->actor->forceFill(['must_change_password' => true])->save();
         $this->putJson($this->url($this->role), $payload)->assertForbidden();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_injected_fields_and_stale_versions_do_not_write(): void
@@ -186,7 +186,7 @@ class RolePermissionChangeTest extends TestCase
         $payload = $this->preview($this->role, []);
         $this->putJson($this->url($this->role), [...$payload, 'is_protected' => false])->assertUnprocessable();
         $this->putJson($this->url($this->role), [...$payload, 'version' => 2])->assertConflict();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_two_previews_cannot_remove_both_remaining_administrators(): void
@@ -203,7 +203,7 @@ class RolePermissionChangeTest extends TestCase
         $this->putJson($this->url($backupRole), $backupPayload)->assertConflict();
         $this->assertTrue(Gate::forUser($backup)->allows('ROLE_MANAGE'));
         $this->assertTrue(Gate::forUser($backup)->allows('USER_ASSIGN_ROLE'));
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_another_authorized_actor_cannot_confirm_someone_elses_preview(): void
@@ -214,7 +214,7 @@ class RolePermissionChangeTest extends TestCase
         $this->signIn($other, 'web');
         $this->putJson($this->url($this->role), $payload)->assertForbidden();
         $this->assertSame(1, $this->role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_guest_cannot_confirm_an_existing_preview(): void
@@ -222,7 +222,7 @@ class RolePermissionChangeTest extends TestCase
         $payload = $this->preview($this->role, []);
         $this->app['auth']->forgetGuards();
         $this->putJson($this->url($this->role), $payload)->assertUnauthorized();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_role_protected_after_preview_cannot_be_changed(): void
@@ -231,7 +231,7 @@ class RolePermissionChangeTest extends TestCase
         $this->role->forceFill(['is_protected' => true])->save();
         $this->putJson($this->url($this->role), $payload)->assertConflict();
         $this->assertSame(['USER_CREATE'], $this->role->permissions()->pluck('code')->all());
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_failed_audit_rolls_back_permissions_and_version(): void
@@ -251,7 +251,7 @@ class RolePermissionChangeTest extends TestCase
         }
         $this->assertSame(['USER_CREATE'], $this->role->permissions()->pluck('code')->all());
         $this->assertSame(1, $this->role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     /** @param list<string> $proposed

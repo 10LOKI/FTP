@@ -435,6 +435,17 @@ class EmployeeAccessResetTest extends TestCase
         }
     }
 
+    public function test_inactive_administrator_backup_cannot_justify_resetting_the_last_usable_admin(): void
+    {
+        $user = User::findOrFail($this->delivery()->user_id);
+        $user->forceFill(['must_change_password' => false])->save();
+        $this->grantAdministrativeAccess($user);
+        $backup = User::factory()->create(['inactivity_suspended_at' => now('UTC'), 'inactivity_version' => 1]);
+        $this->grantAdministrativeAccess($backup);
+        $this->reset($user, $this->payload($user))->assertConflict();
+        $this->assertFalse($user->fresh()->must_change_password);
+    }
+
     private function delivery(): EmployeeAccessDelivery
     {
         $user = User::factory()->create(['password' => 'previous-password']);

@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\InactivitySuspension;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -30,6 +31,26 @@ class EnsureEmployeeSession
         if ($user->must_change_password && ($user->temporary_password_expires_at === null
             || $user->temporary_password_expires_at->lessThanOrEqualTo(now('UTC')))) {
             return response()->json(['code' => 'TEMPORARY_ACCESS_EXPIRED', 'message' => 'Request new access from an authorized administrator.'], 403);
+        }
+
+        app(InactivitySuspension::class)->check($user);
+        $user->refresh();
+        if ($user->inactivity_suspended_at !== null) {
+            if ($request->hasSession()) {
+                $request->session()->put('inactivity_restricted', true);
+                $request->session()->put('inactivity_version', $user->inactivity_version);
+            }
+            if (! $request->routeIs('account.reactivation.*', 'employee.password.replace')) {
+                return response()->json(['code' => 'INACTIVITY_SUSPENDED', 'message' => 'Request administrative reactivation.'], 403);
+            }
+        } elseif (! $request->routeIs('account.reactivation.*')) {
+            $hasSession = $request->hasSession();
+            $staleSession = $hasSession
+                && ((bool) $request->session()->get('inactivity_restricted', false)
+                    || (int) $request->session()->get('inactivity_version', 0) !== $user->inactivity_version);
+            if ($staleSession || (! $hasSession && $user->inactivity_version > 0)) {
+                return $this->invalidate($request);
+            }
         }
 
         return $next($request);

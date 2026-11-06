@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 
 class RolePermissionChange
 {
-    public function __construct(private RolePermissionConfirmation $confirmation, private EffectivePermissions $permissions) {}
+    public function __construct(private RolePermissionConfirmation $confirmation) {}
 
     /** @param list<string> $proposed */
     public function apply(User $actor, Role $role, int $version, array $proposed, string $token): Role
@@ -23,7 +23,7 @@ class RolePermissionChange
             abort_if($current === null, 404);
             abort_if($current->is_protected || $current->version !== $version, 409, 'The role has changed or is protected. Review again.');
             $users = User::orderBy('id')->lockForUpdate()->get();
-            $blockedUsers = CustomerProfile::where('approval', '!=', 'APPROUVE')->orderBy('id')->lockForUpdate()->pluck('user_id')->all();
+            CustomerProfile::where('approval', '!=', 'APPROUVE')->orderBy('id')->lockForUpdate()->pluck('user_id')->all();
             $this->confirmation->verify($actor, $current, $proposed, $token);
             $before = $current->permissions()->orderBy('code')->pluck('code')->all();
             sort($proposed, SORT_STRING);
@@ -36,18 +36,9 @@ class RolePermissionChange
             $definitions = Permission::whereIn('code', $proposed)->orderBy('code')->lockForUpdate()->get();
             abort_unless($definitions->pluck('code')->all() === $proposed, 409, 'The permission catalog has changed. Review again.');
             $current->permissions()->sync($definitions->modelKeys());
-            $administratorRemains = $users->contains(function (User $user) use ($blockedUsers): bool {
-                if ($user->must_change_password || in_array($user->id, $blockedUsers, true)) {
-                    return false;
-                }
-                foreach (AccessPermissionCatalog::ADMINISTRATOR_PERMISSIONS as $permission) {
-                    if (! $this->permissions->allows($user, $permission)) {
-                        return false;
-                    }
-                }
-
-                return true;
-            });
+            $administratorRemains = $users->contains(
+                fn (User $user): bool => app(AdministratorAccess::class)->isUsable($user),
+            );
             abort_unless($administratorRemains, 409, 'Keep ROLE_MANAGE and USER_ASSIGN_ROLE on at least one usable account.');
             $oldVersion = $current->version;
             $current->version++;

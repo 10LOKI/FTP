@@ -7,6 +7,8 @@ use App\Http\Requests\ReplaceTemporaryPasswordRequest;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\User;
+use App\Services\AccountReactivation;
+use App\Services\InactivitySuspension;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -24,17 +26,21 @@ class EmployeeSessionController extends Controller
         abort_if(Auth::guard('web')->check(), 409, 'Sign out before opening another session.');
         $data = $request->validated();
         try {
-            return DB::transaction(function () use ($data, $request): JsonResponse {
-                $user = User::where('email', $data['email'])->lockForUpdate()->first();
-                $valid = (new Timebox)->call(
-                    fn (): bool => $user !== null && $user->access_version > 0 && Hash::check($data['password'], $user->password),
-                    200000,
-                );
-                if (! $valid) {
-                    $this->audit(null, 'employee.login', 'REFUSED', 'invalid_credentials');
+            $candidate = User::where('email', $data['email'])->first();
+            $valid = (new Timebox)->call(
+                fn (): bool => $candidate !== null && $candidate->access_version > 0 && Hash::check($data['password'], $candidate->password),
+                200000,
+            );
+            if (! $valid) {
+                $this->audit(null, 'employee.login', 'REFUSED', 'invalid_credentials');
 
-                    return response()->json(['code' => 'INVALID_CREDENTIALS', 'message' => 'Identifiants invalides.'], 401);
-                }
+                return response()->json(['code' => 'INVALID_CREDENTIALS', 'message' => 'Identifiants invalides.'], 401);
+            }
+            app(InactivitySuspension::class)->check($candidate);
+
+            return DB::transaction(function () use ($candidate, $data, $request): JsonResponse {
+                $user = User::whereKey($candidate->id)->lockForUpdate()->firstOrFail();
+                abort_unless($user->access_version > 0 && Hash::check($data['password'], $user->password), 401, 'Credentials changed. Sign in again.');
                 if ($user->must_change_password && ($user->temporary_password_expires_at === null
                     || $user->temporary_password_expires_at->lessThanOrEqualTo(now('UTC')))) {
                     $this->audit($user, 'employee.login', 'REFUSED', 'temporary_access_expired');
@@ -46,13 +52,26 @@ class EmployeeSessionController extends Controller
 
                     return response()->json(['code' => 'CUSTOMER_CODE_REQUIRED', 'message' => 'Utilisez votre code client pour vous connecter.'], 403);
                 }
+                if (! $user->must_change_password) {
+                    app(AccountReactivation::class)->consumeApproved($user);
+                }
                 Auth::guard('web')->login($user);
                 $request->session()->regenerate();
                 $request->session()->put('employee_access_version', $user->access_version);
+                $restricted = $user->inactivity_suspended_at !== null;
+                $request->session()->put('inactivity_version', $user->inactivity_version);
+                $request->session()->put('inactivity_restricted', $restricted);
+                if ($restricted) {
+                    $this->audit($user, 'employee.login', 'REFUSED', 'inactivity_restricted_session');
+
+                    return response()->json(['code' => 'INACTIVITY_SUSPENDED',
+                        'data' => ['canRequestReactivation' => ! $user->must_change_password,
+                            'mustChangePassword' => $user->must_change_password, 'requiresFreshLoginAfterApproval' => true]], 403);
+                }
                 $this->audit($user, 'employee.login', 'SUCCESS', $user->must_change_password ? 'restricted_session_opened' : 'session_opened');
 
                 return response()->json(['data' => ['userId' => $user->id, 'mustChangePassword' => $user->must_change_password]]);
-            });
+            }, 3);
         } catch (Throwable $exception) {
             $this->closeSession($request);
 
@@ -99,11 +118,17 @@ class EmployeeSessionController extends Controller
 
     private function audit(?User $user, string $action, string $result, string $reason): void
     {
-        AuditEvent::create([
+        $event = AuditEvent::create([
             'actor_id' => $result === 'SUCCESS' ? $user?->id : null,
             'request_id' => (string) Str::uuid(), 'action' => $action,
             'object_type' => 'user', 'object_id' => $user === null ? null : (string) $user->id,
             'result' => $result, 'reason' => $reason, 'changes' => null, 'occurred_at' => now('UTC'),
         ]);
+        if ($action === 'employee.login' && $result === 'SUCCESS' && $user !== null) {
+            if ($user->last_login_at === null || $user->last_login_at->lessThan($event->occurred_at)) {
+                $user->last_login_at = $event->occurred_at;
+                $user->save();
+            }
+        }
     }
 }
