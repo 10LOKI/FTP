@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\CustomerProfile;
 use App\Models\User;
+use App\Services\AuditContext;
 use App\Services\AccessPermissionCatalog;
 use App\Services\EffectivePermissions;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -20,7 +21,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->scoped(AuditContext::class);
     }
 
     /**
@@ -33,7 +34,7 @@ class AppServiceProvider extends ServiceProvider
         }
         RateLimiter::for('customer-commerce', function (Request $request): Limit {
             $actor = $request->user()?->getAuthIdentifier() ?? $request->ip();
-            $readOnly = $request->isMethod('GET');
+            $readOnly = $request->isMethod('GET') || $request->isMethod('HEAD');
 
             return Limit::perMinute($readOnly ? 120 : 30)
                 ->by('customer-commerce:'.($readOnly ? 'read:' : 'write:').$actor);
@@ -61,6 +62,8 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
         RateLimiter::for('temporary-password', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by('temporary-password:'.($request->user()?->id ?? $request->ip())));
+
             ->by('temporary-password:'.$request->user()->getAuthIdentifier()));
         RateLimiter::for('customer-login', function (Request $request): array {
             $identifier = $request->input('identifier');

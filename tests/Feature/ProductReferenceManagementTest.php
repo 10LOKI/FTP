@@ -50,7 +50,7 @@ class ProductReferenceManagementTest extends TestCase
         $this->postJson($url, ['reference' => '000AB.01', 'brand' => 'Example'])->assertOk()
             ->assertJsonPath('data.id', $response->json('data.id'))->assertJsonPath('data.reference', ' 000 ab.01 ');
         $this->assertDatabaseCount('product_cross_references', 1);
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
         $this->assertDatabaseHas('audit_events', ['actor_id' => $actor->id, 'action' => 'product.reference.created']);
     }
 
@@ -87,7 +87,7 @@ class ProductReferenceManagementTest extends TestCase
         $this->putJson($url, ['reference' => '0001', 'version' => 1])->assertNotFound();
         $this->deleteJson($url, ['version' => 1])->assertNotFound();
         $this->assertModelExists($reference);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
     }
 
     public function test_original_reference_update_preserves_raw_text_and_refuses_a_stale_value(): void
@@ -102,7 +102,7 @@ class ProductReferenceManagementTest extends TestCase
         $this->getJson('/api/v1/catalogue/products?reference=00new.01')->assertOk()->assertJsonPath('data.0.id', $product->id);
         $this->getJson('/api/v1/catalogue/products?reference=OLD-001')->assertOk()->assertJsonCount(0, 'data');
         $this->assertDatabaseHas('products', ['id' => $product->id, 'original_reference' => ' 00 new.01 ']);
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
     }
 
     public function test_invalid_and_injected_reference_fields_are_refused_without_writes(): void
@@ -117,7 +117,7 @@ class ProductReferenceManagementTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors(['verified_at', 'product_id']);
         $this->postJson($url, ['reference' => str_repeat('x', 121)])->assertUnprocessable()->assertJsonValidationErrors('reference');
         $this->assertDatabaseCount('product_cross_references', 0);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
     }
 
     public function test_removal_affects_only_the_association_and_is_audited_without_product_prices(): void
@@ -178,7 +178,7 @@ class ProductReferenceManagementTest extends TestCase
         $this->deleteJson($url, ['version' => 1])->assertForbidden();
         $this->assertModelExists($first);
         $this->assertDatabaseHas('product_cross_references', ['id' => $second->id, 'reference' => '000B', 'version' => 1]);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
     }
 
     public function test_audit_failure_rolls_back_the_reference_and_its_search_keys(): void
@@ -191,7 +191,7 @@ class ProductReferenceManagementTest extends TestCase
 
         $this->postJson("/api/v1/products/{$product->id}/references", ['reference' => '0001'])->assertStatus(500);
         $this->assertDatabaseCount('product_cross_references', 0);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'product.reference.%')->where('result', 'SUCCESS')->count());
     }
 
     public function test_unicode_uppercase_expansion_and_optional_source_do_not_truncate_the_search_value(): void

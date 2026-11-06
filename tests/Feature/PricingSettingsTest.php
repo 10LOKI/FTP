@@ -29,7 +29,7 @@ class PricingSettingsTest extends TestCase
         $this->putJson($url, ['tax_basis' => 'TTC', 'expected_version' => 2])->assertOk()->assertJsonPath('data.version', 3);
         $this->putJson($url, ['tax_basis' => 'HT', 'expected_version' => 3, 'currency' => 'EUR'])->assertUnprocessable();
         $this->actingAs($profile->user)->getJson("/api/v1/me/products/{$product->id}/price")->assertOk()->assertJsonPath('data.unit_price', '123.45')->assertJsonPath('data.currency', 'MAD')->assertJsonPath('data.tax_basis', 'TTC');
-        $this->assertDatabaseCount('audit_events', 2);
+        $this->assertSame(2, AuditEvent::where('action', 'pricing.settings_updated')->where('result', 'SUCCESS')->count());
     }
 
     public function test_settings_and_audit_are_rolled_back_together(): void

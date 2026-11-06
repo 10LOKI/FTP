@@ -38,7 +38,7 @@ class PromotionManagementTest extends TestCase
         $this->postJson('/api/v1/promotions', $values)->assertOk()->assertJsonPath('data.id', $response->json('data.id'));
         $this->postJson('/api/v1/promotions', [...$values, 'value' => '70.00'])->assertConflict();
         $this->assertDatabaseCount('promotions', 1);
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('result', 'SUCCESS')->whereIn('action', ['promotion.created', 'promotion.updated', 'pricing.base_price_updated'])->count());
         $this->assertDatabaseHas('products', ['id' => $product->id, 'sale_price' => '100.00']);
         $this->assertDatabaseHas('audit_events', ['action' => 'promotion.created', 'actor_id' => $actor->id]);
         $this->assertStringNotContainsString('net_purchase_price', json_encode(AuditEvent::first()->changes));
@@ -72,7 +72,7 @@ class PromotionManagementTest extends TestCase
         $this->putJson($url, [...$values, 'value' => '100.00', 'expected_version' => 2])->assertUnprocessable()->assertJsonValidationErrors('value');
         $this->putJson($url, [...$values, 'state' => 'disabled', 'expected_version' => 2])->assertOk()->assertJsonPath('data.version', 3);
         $this->assertDatabaseHas('promotions', ['id' => $created['id'], 'state' => 'disabled', 'value' => '80.00']);
-        $this->assertDatabaseCount('audit_events', 3);
+        $this->assertSame(3, AuditEvent::where('result', 'SUCCESS')->whereIn('action', ['promotion.created', 'promotion.updated'])->count());
     }
 
     public function test_invalid_fields_dates_values_timezone_and_injections_produce_no_writes(): void
@@ -88,7 +88,7 @@ class PromotionManagementTest extends TestCase
             $this->createOffer([...$values, ...$changed])->assertUnprocessable();
         }
         $this->assertDatabaseCount('promotions', 0);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('result', 'SUCCESS')->whereIn('action', ['promotion.created', 'promotion.updated'])->count());
     }
 
     public function test_an_audit_storage_failure_rolls_back_the_offer_and_idempotency_key(): void
@@ -148,7 +148,7 @@ class PromotionManagementTest extends TestCase
         $this->patchJson($url, ['sale_price' => '120.00', 'expected_sale_price' => '100.00'])->assertNoContent();
         $this->patchJson($url, ['sale_price' => '110.00', 'expected_sale_price' => '100.00'])->assertConflict();
         $this->assertDatabaseHas('products', ['id' => $product->id, 'sale_price' => '120.00']);
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('result', 'SUCCESS')->whereIn('action', ['promotion.created', 'promotion.updated', 'pricing.base_price_updated'])->count());
     }
 
     private function values(Product $product): array

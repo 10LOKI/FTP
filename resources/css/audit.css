@@ -1,0 +1,18 @@
+
+.audit-scroll { overflow-x: auto; max-width: 100%; margin-block: 1rem; }
+.audit-scroll table { width: 100%; min-width: 42rem; border-collapse: collapse; }
+.audit-scroll th, .audit-scroll td { padding: .75rem; border-bottom: 1px solid #cbd5e1; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.audit-scroll pre { white-space: pre-wrap; max-width: 25rem; }
+#audit-console section { margin-block: 2rem; }
+#audit-console li { overflow-wrap: anywhere; padding-block: .5rem; }
+
+.audit-cards { display: none; list-style: none; padding: 0; }
+.audit-cards li { border: 1px solid #cbd5e1; border-radius: .5rem; padding: 1rem; margin-block: .75rem; }
+.audit-cards dt { font-weight: 600; }
+.audit-cards dd { margin: 0 0 .5rem; }
+.audit-cards pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 42rem) { .audit-scroll { display: none; } .audit-cards { display: block; } }
+
+.audit-filters { margin-block: 1rem; }
+.audit-filters summary { cursor: pointer; font-weight: 600; padding-block: .5rem; }
+#audit-console .audit-filters form { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); align-items: end; }
