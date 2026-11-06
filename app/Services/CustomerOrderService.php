@@ -76,7 +76,8 @@ class CustomerOrderService
             ]);
             DB::table('cart_lines')->where('cart_id', $cart['id'])->delete();
             DB::table('carts')->where('id', $cart['id'])->increment('version', 1, ['updated_at' => $now]);
-            $this->audit($userId, $requestId, $id, 'order.submitted');
+            $event = $this->audit($userId, $requestId, $id, 'order.submitted');
+            app(DurableNotifications::class)->orderReceived(DB::table('customer_orders')->where('id', $id)->first(), $event);
 
             return ['order' => DB::table('customer_orders')->where('id', $id)->first(), 'replayed' => false];
         }, 3);
@@ -120,9 +121,9 @@ class CustomerOrderService
         return $result;
     }
 
-    private function audit(int $userId, string $requestId, int $orderId, string $action): void
+    private function audit(int $userId, string $requestId, int $orderId, string $action): AuditEvent
     {
-        AuditEvent::create(['actor_id' => $userId, 'request_id' => $requestId, 'action' => $action,
+        return AuditEvent::create(['actor_id' => $userId, 'request_id' => $requestId, 'action' => $action,
             'object_type' => 'customer_order', 'object_id' => (string) $orderId, 'result' => 'SUCCESS',
             'changes' => null, 'occurred_at' => now('UTC')]);
     }

@@ -11,3 +11,5 @@ Artisan::command('inspire', function () {
 Schedule::command('customers:send-approval-notifications')->everyMinute()->withoutOverlapping();
 
 Schedule::command('employees:send-access')->everyMinute()->withoutOverlapping();
+
+Schedule::command('notifications:deliver')->everyMinute()->withoutOverlapping();

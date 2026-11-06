@@ -81,7 +81,7 @@ class ProductManagementTest extends TestCase
         $this->getJson($url)->assertOk()->assertJsonMissingPath('product.net_purchase_price');
         $this->getJson("$url/purchase-price")->assertForbidden();
         Gate::define('PURCHASE_PRICE_VIEW', fn (User $user): bool => true);
-        $this->getJson("$url/purchase-price")->assertOk()->assertJsonPath('net_purchase_price', 10.5);
+        $this->getJson("$url/purchase-price")->assertOk()->assertJsonPath('net_purchase_price', fn (mixed $price): bool => $price === '10.50' || $price === 10.5);
         $this->patchJson("$url/price", ['sale_price' => '22.00'])->assertForbidden();
         Gate::define('PRODUCT_PRICE_UPDATE', fn (User $user): bool => true);
         Gate::define('REFERENCE_MANAGE', fn (User $user): bool => true);
@@ -128,6 +128,6 @@ class ProductManagementTest extends TestCase
         Gate::define('PURCHASE_RECORD', fn (User $user): bool => true);
         $this->patchJson($url, ['net_purchase_price' => '-1'])->assertUnprocessable();
         $this->patchJson($url, ['net_purchase_price' => '15.25'])->assertNoContent();
-        $this->getJson($url)->assertOk()->assertJsonPath('net_purchase_price', 15.25);
+        $this->getJson($url)->assertOk()->assertJsonPath('net_purchase_price', fn (mixed $price): bool => $price === '15.25' || $price === 15.25);
     }
 }

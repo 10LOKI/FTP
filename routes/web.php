@@ -1,10 +1,12 @@
 <?php
 
+use App\Http\Controllers\AuditController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\EmployeeSessionController;
+use App\Http\Controllers\NotificationDeliveryController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PromotionController;
@@ -55,7 +57,6 @@ Route::post('/api/v1/employee-login', [EmployeeSessionController::class, 'store'
     ->middleware('throttle:employee-login');
 Route::post('/api/v1/temporary-password', [EmployeeSessionController::class, 'replacePassword'])
     ->middleware(['auth:sanctum', 'throttle:temporary-password'])->name('employee.password.replace');
-Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum');
 
 Route::get('/api/v1/catalogue/products', [PublicCatalogueController::class, 'index'])->name('public.products.index');
 Route::get('/api/v1/catalogue/products/{product}', [PublicCatalogueController::class, 'show'])
@@ -75,4 +76,13 @@ Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): v
     Route::put('/api/v1/customers/{customerProfile}/discount', [CustomerPricingController::class, 'updateDiscount'])->name('discounts.update');
     Route::get('/api/v1/me/promotions', [PublicCatalogueController::class, 'promotions'])->name('customer.promotions.index');
     Route::get('/api/v1/me/products/{product}/price', [CustomerPricingController::class, 'show'])->whereNumber('product')->name('customer.price');
+});
+
+Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/gestion/audit', [AuditController::class, 'page'])->name('audit.page');
+    Route::get('/api/v1/audit-events/export', [AuditController::class, 'export'])->middleware('throttle:5,1')->name('audit.export');
+    Route::get('/api/v1/audit-events', [AuditController::class, 'index'])->name('audit.index');
+    Route::get('/api/v1/notification-deliveries', [NotificationDeliveryController::class, 'index'])->name('notification-deliveries.index');
+    Route::post('/api/v1/notification-deliveries/{kind}/{delivery}/retry', [NotificationDeliveryController::class, 'retry'])
+        ->whereUuid('delivery')->middleware('throttle:30,1')->name('notification-deliveries.retry');
 });

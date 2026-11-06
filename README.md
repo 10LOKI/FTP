@@ -507,3 +507,48 @@ Source : [notes IANA 2026c](https://data.iana.org/time-zones/tzdb-2026c/NEWS).
 ```sh
 docker compose exec -T -e APP_ENV=testing -e DB_CONNECTION=sqlite -e DB_DATABASE=:memory: -e DB_URL= -e SESSION_DRIVER=array -e CACHE_STORE=array -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array ftp vendor/bin/phpunit
 ```
+
+
+### FTP-31 — Journal immuable et notifications durables
+
+`GET /gestion/audit` fournit le journal React, les filtres et le suivi des envois. Les droits sont contrôlés côté serveur : `AUDIT_READ` pour lire les événements et les états d’envoi, `AUDIT_EXPORT` pour télécharger le journal. La capacité distincte `NOTIFICATION_RETRY` est le contrat de reprise à raccorder aux rôles FTP-13 ; reprendre un accès employé exige également `USER_RESET_ACCESS`. Aucun rôle n’est accordé par cette feature. Les tests positifs utilisent des Gates de fixture et ne valident pas encore le fournisseur réel FTP-13.
+
+Toutes les routes ci-dessous utilisent la session authentifiée et retournent des JSON avec `Accept: application/json`. Une écriture doit fournir le cookie de session et le jeton CSRF comme les formulaires existants. Un visiteur reçoit 401 ; un compte sans capacité reçoit 403. L’interface masque les actions indisponibles mais les API les contrôlent indépendamment.
+
+| Méthode et chemin | Contrat |
+| --- | --- |
+| `GET /api/v1/audit-events` | Pagination `per_page` 1–100 avec curseurs opaques `meta.next_cursor` / `meta.previous_cursor` à transmettre dans `cursor` ; filtres `month=2026-11`, `actor_id`, `action`, `object_type`, `object_id`, `result=SUCCESS/REFUSED/FAILED`, `from`/`to` ISO 8601 avec fuseau. Bornes mensuelles dans Africa/Casablanca, début inclus/fin exclue ; dates retournées en UTC. |
+| `GET /api/v1/audit-events/export?month=2026-11` | Droit AUDIT_EXPORT séparé ; vrai fichier `.xlsx` contenant tous les événements correspondant au mois et aux filtres, sans limite cachée de pagination. `X-Audit-Export-Count` donne le nombre de lignes. Préparation en snapshot transactionnel ; cellules texte explicites, sans formules. Export au-delà de la capacité d’une feuille Excel refusé (413), jamais tronqué. |
+| `GET /api/v1/notification-deliveries` | Droit AUDIT_READ ; pagination et filtres `kind=approval/employee/order`, `status=PENDING/RETRY/SENT/EXPIRED`. Réponse limitée aux identifiants techniques, états, dates, tentatives et codes d’erreur ; aucun destinataire, mot de passe, contenu de mail ou payload métier. |
+| `POST /api/v1/notification-deliveries/{kind}/{uuid}/retry` | JSON `{"expected_attempts":2}` ; droit NOTIFICATION_RETRY (+USER_RESET_ACCESS pour employé), CSRF et limite 30/minute. Seul RETRY est repris. Inconnu 404, état/tentative périmé ou accès expiré 409, champs imposés par le client 422. Réponse 202 : reprise programmée, sans envoi dans la requête ni recréation de compte/commande. |
+
+Décisions de Khalid du 6 novembre 2026 : **les événements restent conservés** ; export Excel mensuel déclenché depuis la page, téléchargement à vérifier dans le navigateur. Aucun effacement automatique ni commande d’édition/suppression du journal. Un export du mois en cours couvre les événements déjà enregistrés ; le mois peut être téléchargé à nouveau après sa clôture. Les fichiers sont préparés dans le stockage privé avec droits 0600 puis supprimés après transmission ; cela ne supprime aucun événement.
+
+Le schéma d’événement v1 conserve les champs existants `id`, `actor_id`, `request_id`, `action`, `object_type`, `object_id`, `result`, `reason`, `changes`, `occurred_at`. Il ajoute `schema_version`, `actor_kind` (account/visitor/system), `role_context` (codes des rôles au moment de l’événement), `context` (origine ou méthode/route/identifiant HTTP). L’API signale `role_context_available=false` pour les événements historiques dont les rôles ne peuvent pas être reconstitués. Les champs avant/après sont filtrés par liste blanche, y compris en lecture des événements antérieurs ; mots de passe, jetons, cookies, corps de requête, remarques internes et URLs contenant potentiellement des secrets sont exclus. Le contexte HTTP est produit côté serveur, avec `X-Request-ID` ; les identifiants d’opérations existants restent conservés.
+
+Contrat pour les autres features : `AuditWriter::record($event)` écrit un événement filtré. Le succès critique doit être écrit **dans la même transaction que la mutation métier**. `AuditWriter::transaction($operation, $failureMetadata)` fournit cette frontière aux traitements autonomes : il doit posséder la transaction extérieure, conserve le refus/échec après rollback et ne conserve pas le message brut de l’exception. Les services HTTP existants gardent leurs propres transactions et stratégies de reprise ; le middleware commun attribue les recherches/consultations/refus manquants et restaure après rollback les événements d’échec tamponnés, sans envelopper toutes les requêtes dans une transaction supplémentaire. Les mutations produit auparavant non auditées sont désormais atomiques avec leur événement. La couverture des futurs stocks, scans, factures et retours reste de la responsabilité de leurs features, à brancher à ce contrat.
+
+L’approbation client et l’accès employé conservent leurs tables d’outbox et leurs commandes existantes. `notification_deliveries` fournit l’outbox typée pour `order.received`, liée à son événement déclencheur et unique par événement/destinataire/type/canal. Le hook de commande persiste l’intention dans la transaction et les replays ne créent pas d’autre intention. **L’envoi des commandes reste désactivé** (`ORDER_RECEIVED_NOTIFICATION_ENABLED=false`) jusqu’à validation du canal et du contenu ; les tests d’envoi l’activent seulement dans leur configuration isolée. La reprise HTTP ne permet pas de l’activer.
+
+Les workers livrent seulement les intentions déjà commitées, sous verrou, et conservent les états/erreurs techniques sans message brut du transport. Une panne de mail conserve l’opération métier et programme un nouvel essai à cinq minutes. Un statut SENT ne peut pas être repris par l’API. Un arrêt entre l’acceptation SMTP et le commit peut produire un autre exemplaire du mail : le message de commande garde le même Message-ID, et aucune reprise ne rejoue la commande. Une acceptation du transport ne prouve pas la réception finale dans une boîte mail.
+
+```sh
+# À exécuter sur un environnement dont le transport mail est configuré et autorisé.
+php artisan schedule:work
+# Ou lancer ponctuellement le traitement souhaité :
+php artisan customers:send-approval-notifications --limit=50
+php artisan employees:send-access --limit=50
+php artisan notifications:deliver --limit=50
+```
+
+La planification figure dans `routes/console.php` ; le conteneur web de développement ne lance pas seul le scheduler. Le transport `log` est refusé pour l’accès temporaire et les messages de commande ; les tests utilisent exclusivement le transport `array`. La recette SMTP réelle et le raccordement des capacités FTP-13 restent à qualifier avant de déclarer la story Done.
+
+Les triggers SQLite/MySQL refusent UPDATE et DELETE, y compris via Query Builder ; Eloquent refuse également toute modification/suppression. La migration additive reprend sans effacement un DDL MySQL partiellement appliqué. Compose est explicitement un environnement de développement : `log_bin_trust_function_creators=1` permet d’installer ces triggers avec le propriétaire du schéma sans lui accorder SUPER. En exploitation, l’installation/archivage et les droits DDL relèvent d’un compte technique séparé ; les rôles applicatifs n’ont aucune API de modification du journal. Les protections ne prétendent pas empêcher un administrateur technique de supprimer une table.
+
+Pour une démonstration locale facultative sans compte ni permission créée : `FTP_AUDIT_DEMO=1 php artisan db:seed --class=AuditDemoSeeder --no-interaction`. Ce seeder ajoute 25 événements fictifs, aucun message n’est envoyé. Ne pas confondre ces fixtures ou les Gates de tests avec la validation des rôles réels.
+
+Le journal distingue l’ouverture de la console (`audit.page_view`), la lecture des données (`audit.read`), la préparation Excel (`audit.export`) et le contrôle HEAD (`audit.export_metadata`, sans génération de fichier). Les reprises emploient le même type d’objet que leur envoi : `approval_notification`, `employee_access_delivery`, `notification_delivery`. HEAD du panier/historique conserve un événement de lecture et utilise le budget de lecture.
+
+Le journal utilise une pagination par curseur `(occurred_at, id)` : ses propres événements de lecture et les nouveaux événements ne décalent pas les lignes déjà parcourues. Appliquer les filtres repart de la première page ; un curseur invalide est refusé (422). Les listes d’envoi gardent leur pagination par page.
+
+Vérification du 6 novembre 2026 : Pint et build réussis ; suite Docker SQLite complète, 475 tests / 2364 assertions, six sauts réservés à MySQL/pcntl. Les 82 tests ciblés sur MySQL 8.4 jetable passent (566 assertions), dont ces six cas de concurrence. Le `phpunit.xml` impose SQLite avec `force=true` : une simple variable d’environnement ne suffit pas pour exécuter MySQL. Utiliser une configuration de test distincte sans les entrées `server DB_*` forcées, uniquement contre une base de test jetable ; conserver les autres paramètres testing, mail/cache/session array. Ne pas lancer les migrations destructives des tests contre la base de développement.

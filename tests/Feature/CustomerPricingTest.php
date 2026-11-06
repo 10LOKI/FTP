@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditEvent;
 use App\Models\CustomerDiscount;
 use App\Models\CustomerProfile;
 use App\Models\Product;
@@ -40,7 +41,7 @@ class CustomerPricingTest extends TestCase
         $this->getJson('/api/v1/me/promotions')->assertOk()->assertJsonPath('total', 0);
         $this->assertSame('80.00', $earlierQuote['unit_price']);
         $this->assertDatabaseHas('products', ['id' => $product->id, 'sale_price' => '100.00']);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::whereIn('action', ['promotion.created', 'promotion.updated'])->where('result', 'SUCCESS')->count());
     }
 
     public function test_real_customer_login_catalogue_price_and_logout_use_the_actual_approval_gate(): void

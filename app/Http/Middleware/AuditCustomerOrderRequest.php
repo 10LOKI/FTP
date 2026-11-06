@@ -39,7 +39,7 @@ class AuditCustomerOrderRequest
             throw $exception;
         }
 
-        if ($response->getStatusCode() >= 400 || $request->isMethod('GET')) {
+        if ($response->getStatusCode() >= 400 || ($request->isMethod('GET') || $request->isMethod('HEAD'))) {
             $this->record($request, $requestId, $response->getStatusCode());
         }
 
@@ -52,7 +52,7 @@ class AuditCustomerOrderRequest
     {
         AuditEvent::create([
             'actor_id' => $request->user()?->getAuthIdentifier(), 'request_id' => $requestId,
-            'action' => $request->isMethod('GET') ? 'order.view' : 'order.submit',
+            'action' => ($request->isMethod('GET') || $request->isMethod('HEAD')) ? 'order.view' : 'order.submit',
             'object_type' => 'customer_order', 'object_id' => null,
             'result' => $status >= 500 ? 'FAILED' : ($status >= 400 ? 'REFUSED' : 'SUCCESS'),
             'reason' => $status >= 400 ? 'http_'.$status : null,
