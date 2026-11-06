@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccessReadController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerAccountController;
 use App\Http\Controllers\CustomerApprovalDecisionController;
@@ -9,6 +10,8 @@ use App\Http\Controllers\CustomerReviewController;
 use App\Http\Controllers\EmployeeAccessResetController;
 use App\Http\Controllers\EmployeeProvisioningController;
 use App\Http\Controllers\RoleCatalogController;
+use App\Http\Controllers\RoleDeletionController;
+use App\Http\Controllers\RoleEditorController;
 use App\Http\Middleware\AuditCartRequest;
 use App\Http\Middleware\AuditCustomerApprovalDecision;
 use App\Http\Middleware\AuditCustomerOrderRequest;
@@ -59,3 +62,20 @@ Route::get('/v1/employee-access-deliveries/{delivery}', [EmployeeProvisioningCon
 
 Route::post('/v1/users/{user}/access-resets', EmployeeAccessResetController::class)
     ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:USER_RESET_ACCESS']);
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:ROLE_MANAGE'])->group(function (): void {
+    Route::get('/v1/access/roles', [AccessReadController::class, 'roles']);
+    Route::post('/v1/access/roles', [RoleEditorController::class, 'store']);
+    Route::patch('/v1/access/roles/{role}', [RoleEditorController::class, 'rename'])->whereUuid('role');
+    Route::post('/v1/access/roles/{role}/permission-change-preview', [RoleEditorController::class, 'preview'])->whereUuid('role');
+    Route::put('/v1/access/roles/{role}/permissions', [RoleEditorController::class, 'confirm'])->whereUuid('role');
+    Route::get('/v1/access/permissions', [AccessReadController::class, 'permissions']);
+});
+
+Route::get('/v1/me/permissions', [AccessReadController::class, 'ownPermissions'])
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class]);
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:ROLE_DELETE'])->group(function (): void {
+    Route::get('/v1/access/roles/{role}/deletion-preview', [RoleDeletionController::class, 'preview'])->whereUuid('role');
+    Route::delete('/v1/access/roles/{role}', [RoleDeletionController::class, 'destroy'])->whereUuid('role');
+});

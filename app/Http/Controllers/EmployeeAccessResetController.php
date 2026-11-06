@@ -5,8 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ResetEmployeeAccessRequest;
 use App\Http\Resources\EmployeeProvisioningResource;
 use App\Models\AuditEvent;
+use App\Models\CustomerProfile;
 use App\Models\EmployeeAccessDelivery;
+use App\Models\Role;
 use App\Models\User;
+use App\Services\EffectivePermissions;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -15,12 +18,22 @@ use Illuminate\Support\Str;
 
 class EmployeeAccessResetController extends Controller
 {
+    private function isUsableAdministrator(User $user): bool
+    {
+        return ! $user->must_change_password
+            && ! CustomerProfile::where('user_id', $user->id)->where('approval', '!=', 'APPROUVE')->exists()
+            && app(EffectivePermissions::class)->allows($user, 'ROLE_MANAGE')
+            && app(EffectivePermissions::class)->allows($user, 'USER_ASSIGN_ROLE');
+    }
+
     public function __invoke(ResetEmployeeAccessRequest $request, User $user): JsonResponse
     {
         $data = $request->validated();
         try {
             $delivery = DB::transaction(function () use ($request, $data, $user): EmployeeAccessDelivery {
-                $target = User::whereKey($user->id)->lockForUpdate()->firstOrFail();
+                Role::orderBy('id')->lockForUpdate()->get();
+                User::orderBy('id')->lockForUpdate()->get();
+                $target = User::whereKey($user->id)->firstOrFail();
                 Gate::authorize('USER_RESET_ACCESS');
                 $existing = EmployeeAccessDelivery::whereKey($data['request_id'])->lockForUpdate()->first();
                 if ($existing !== null) {
@@ -35,12 +48,19 @@ class EmployeeAccessResetController extends Controller
                 $hours = filter_var(config('employee_access.validity_hours'), FILTER_VALIDATE_INT);
                 abort_unless($hours !== false && $hours >= 1 && $hours <= 168, 503, 'Configure a temporary access lifetime between 1 and 168 hours.');
 
+                $wasAdministrator = $this->isUsableAdministrator($target);
                 $target->password = bin2hex(random_bytes(24));
                 $target->must_change_password = true;
                 $target->temporary_password_expires_at = now('UTC')->addHours($hours);
                 $target->access_version++;
                 $target->setRememberToken(Str::random(60));
                 $target->save();
+                if ($wasAdministrator) {
+                    $remaining = User::whereKeyNot($target->id)->get()->contains(
+                        fn (User $candidate): bool => $this->isUsableAdministrator($candidate),
+                    );
+                    abort_unless($remaining, 409, 'Resetting this account would remove the last usable administrator.');
+                }
 
                 EmployeeAccessDelivery::where('user_id', $target->id)->whereIn('status', ['PENDING', 'RETRY'])
                     ->update(['status' => 'EXPIRED', 'last_error_code' => 'ACCESS_SUPERSEDED', 'next_attempt_at' => null]);

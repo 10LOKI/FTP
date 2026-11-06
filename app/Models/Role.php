@@ -22,6 +22,12 @@ class Role extends Model
         return ['is_protected' => 'boolean', 'version' => 'integer'];
     }
 
+    /** @return BelongsToMany<Permission, $this> */
+    public function permissions(): BelongsToMany
+    {
+        return $this->belongsToMany(Permission::class, 'role_permissions');
+    }
+
     /** @return BelongsToMany<User, $this> */
     public function users(): BelongsToMany
     {
