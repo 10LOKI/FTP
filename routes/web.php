@@ -55,7 +55,6 @@ Route::post('/api/v1/employee-login', [EmployeeSessionController::class, 'store'
     ->middleware('throttle:employee-login');
 Route::post('/api/v1/temporary-password', [EmployeeSessionController::class, 'replacePassword'])
     ->middleware(['auth:sanctum', 'throttle:temporary-password'])->name('employee.password.replace');
-Route::post('/api/v1/logout', [CustomerSessionController::class, 'destroy'])->middleware('auth:sanctum');
 
 Route::get('/api/v1/catalogue/products', [PublicCatalogueController::class, 'index'])->name('public.products.index');
 Route::get('/api/v1/catalogue/products/{product}', [PublicCatalogueController::class, 'show'])

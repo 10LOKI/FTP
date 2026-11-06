@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Models\CustomerProfile;
 use App\Models\User;
+use App\Services\AccessPermissionCatalog;
+use App\Services\EffectivePermissions;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -26,6 +28,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        foreach (AccessPermissionCatalog::LABELS as $code => $label) {
+            Gate::define($code, fn (User $user): bool => app(EffectivePermissions::class)->allows($user, $code));
+        }
         RateLimiter::for('customer-commerce', function (Request $request): Limit {
             $actor = $request->user()?->getAuthIdentifier() ?? $request->ip();
             $readOnly = $request->isMethod('GET');
@@ -46,6 +51,17 @@ class AppServiceProvider extends ServiceProvider
             ->where('user_id', $user->getAuthIdentifier())
             ->where('approval', 'APPROUVE')->exists());
 
+        RateLimiter::for('employee-login', function (Request $request): array {
+            $email = $request->input('email');
+            $email = is_string($email) ? Str::lower($email) : '';
+
+            return [
+                Limit::perMinute(5)->by('employee-login:'.hash('sha256', $email.'|'.$request->ip())),
+                Limit::perMinute(30)->by('employee-login-ip:'.$request->ip()),
+            ];
+        });
+        RateLimiter::for('temporary-password', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by('temporary-password:'.$request->user()->getAuthIdentifier()));
         RateLimiter::for('customer-login', function (Request $request): array {
             $identifier = $request->input('identifier');
             $identifier = is_string($identifier) ? Str::lower($identifier) : '';

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\EmployeeAccessDelivery;
+use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\EmployeeAccessSender;
@@ -396,6 +397,42 @@ class EmployeeAccessResetTest extends TestCase
         $this->withCookie(config('session.cookie'), $csrf->getCookie(config('session.cookie'))->getValue())
             ->withHeader('X-XSRF-TOKEN', $csrf->getCookie('XSRF-TOKEN', false)->getValue());
         $this->reset($user, $request)->assertStatus(202);
+    }
+
+    public function test_reset_cannot_disable_the_last_usable_administrator(): void
+    {
+        $user = User::findOrFail($this->delivery()->user_id);
+        $user->forceFill(['must_change_password' => false])->save();
+        $this->grantAdministrativeAccess($user);
+        $password = $user->password;
+        $version = $user->access_version;
+        $this->reset($user, $this->payload($user))->assertConflict();
+        $this->assertSame($password, $user->fresh()->password);
+        $this->assertSame($version, $user->fresh()->access_version);
+        $this->assertFalse($user->fresh()->must_change_password);
+        $this->assertSame(0, AuditEvent::where('action', 'employee.access.reset')->count());
+    }
+
+    public function test_administrator_reset_is_allowed_when_a_usable_backup_remains(): void
+    {
+        $user = User::findOrFail($this->delivery()->user_id);
+        $user->forceFill(['must_change_password' => false])->save();
+        $this->grantAdministrativeAccess($user);
+        $backup = User::factory()->create();
+        $this->grantAdministrativeAccess($backup);
+        $this->reset($user, $this->payload($user))->assertStatus(202);
+        $this->assertTrue($user->fresh()->must_change_password);
+        $this->assertFalse($backup->fresh()->must_change_password);
+    }
+
+    private function grantAdministrativeAccess(User $user): void
+    {
+        $role = Role::factory()->create();
+        $user->roles()->attach($role->id, ['assigned_by' => $this->actor->id, 'assigned_at' => now()]);
+        foreach (['ROLE_MANAGE', 'USER_ASSIGN_ROLE'] as $code) {
+            $permission = Permission::firstOrCreate(['code' => $code], ['module' => 'access', 'label' => $code]);
+            $role->permissions()->attach($permission->id);
+        }
     }
 
     private function delivery(): EmployeeAccessDelivery
