@@ -1,10 +1,14 @@
 <?php
 
 use App\Http\Controllers\AccessReadController;
+use App\Http\Controllers\AccountReactivationController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerAccountController;
+use App\Http\Controllers\CustomerAddressChangeController;
 use App\Http\Controllers\CustomerApprovalDecisionController;
+use App\Http\Controllers\CustomerIdentityChangeController;
 use App\Http\Controllers\CustomerOrderController;
+use App\Http\Controllers\CustomerProfileController;
 use App\Http\Controllers\CustomerRegistrationController;
 use App\Http\Controllers\CustomerReviewController;
 use App\Http\Controllers\EmployeeAccessResetController;
@@ -78,4 +82,48 @@ Route::get('/v1/me/permissions', [AccessReadController::class, 'ownPermissions']
 Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:ROLE_DELETE'])->group(function (): void {
     Route::get('/v1/access/roles/{role}/deletion-preview', [RoleDeletionController::class, 'preview'])->whereUuid('role');
     Route::delete('/v1/access/roles/{role}', [RoleDeletionController::class, 'destroy'])->whereUuid('role');
+});
+
+Route::get('/v1/me/profile', [CustomerProfileController::class, 'show'])
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class])->name('customer.profile.show');
+
+Route::patch('/v1/me/profile/phone', [CustomerProfileController::class, 'updatePhone'])
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class])->name('customer.profile.phone.update');
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/v1/me/profile/address-change-requests', [CustomerAddressChangeController::class, 'ownIndex']);
+    Route::post('/v1/me/profile/address-change-requests', [CustomerAddressChangeController::class, 'store']);
+});
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:CUSTOMER_APPROVE'])->group(function (): void {
+    Route::get('/v1/customer-address-changes', [CustomerAddressChangeController::class, 'staffIndex']);
+    Route::get('/v1/customer-address-changes/{change}', [CustomerAddressChangeController::class, 'show'])->whereUuid('change');
+    Route::post('/v1/customer-address-changes/{change}/decisions', [CustomerAddressChangeController::class, 'decide'])->whereUuid('change');
+});
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/v1/me/profile/identity-change-requests', [CustomerIdentityChangeController::class, 'ownIndex']);
+    Route::post('/v1/me/profile/identity-change-requests', [CustomerIdentityChangeController::class, 'store']);
+    Route::post('/v1/me/profile/identity-change-requests/{change}/verification', [CustomerIdentityChangeController::class, 'resend'])->whereUuid('change')->middleware('throttle:6,1');
+});
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:CUSTOMER_APPROVE'])->group(function (): void {
+    Route::get('/v1/customer-identity-changes', [CustomerIdentityChangeController::class, 'staffIndex']);
+    Route::get('/v1/customer-identity-changes/{change}', [CustomerIdentityChangeController::class, 'show'])->whereUuid('change');
+    Route::post('/v1/customer-identity-changes/{change}/decisions', [CustomerIdentityChangeController::class, 'decide'])->whereUuid('change');
+});
+
+Route::get('/v1/customer-identity-changes/{change}/verify-email', [CustomerIdentityChangeController::class, 'verifyEmail'])
+    ->whereUuid('change')->middleware(['signed', 'throttle:6,1'])->name('customer.identity.email.verify');
+
+Route::middleware(['auth:sanctum'])->group(function (): void {
+    Route::get('/v1/me/reactivation-requests', [AccountReactivationController::class, 'ownIndex'])->name('account.reactivation.index');
+    Route::post('/v1/me/reactivation-requests', [AccountReactivationController::class, 'store'])
+        ->middleware('throttle:6,1')->name('account.reactivation.store');
+});
+
+Route::middleware(['auth:sanctum', EnsureCustomerApproved::class, 'can:CUSTOMER_APPROVE'])->group(function (): void {
+    Route::get('/v1/account-reactivations', [AccountReactivationController::class, 'staffIndex']);
+    Route::get('/v1/account-reactivations/{reactivation}', [AccountReactivationController::class, 'show'])->whereUuid('reactivation');
+    Route::post('/v1/account-reactivations/{reactivation}/decisions', [AccountReactivationController::class, 'decide'])->whereUuid('reactivation');
 });

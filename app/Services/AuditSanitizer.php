@@ -6,7 +6,7 @@ class AuditSanitizer
 {
     private const FIELDS = [
         'before', 'after', 'id', 'product_id', 'customer_profile_id', 'customer_code', 'type', 'approval',
-        'version', 'access_version', 'must_change_password', 'role_ids', 'delivery_id', 'status', 'attempt',
+        'code', 'label', 'permissions', 'version', 'access_version', 'must_change_password', 'role_ids', 'delivery_id', 'status', 'attempt',
         'approval_event_id', 'trigger_event_id', 'schema_version', 'publication', 'sale_price', 'percentage',
         'currency', 'tax_basis', 'reference', 'original_reference', 'brand', 'verified_at', 'starts_at', 'ends_at',
         'state', 'kind', 'value', 'quantity', 'units_per_package', 'before_quantity', 'after_quantity',
@@ -19,6 +19,12 @@ class AuditSanitizer
         if ($values === null || $depth > 5) {
             return null;
         }
+        // Role changes accept up to 1,000 permission codes; keep the complete audit delta.
+        if ($field === 'permissions') {
+            return array_values(array_filter(array_slice($values, 0, 1000), fn ($value): bool => is_string($value)
+                && preg_match('/\A[A-Za-z][A-Za-z0-9_]{0,254}\z/', $value) === 1));
+        }
+
         $safe = [];
         foreach (array_slice($values, 0, 100, true) as $key => $value) {
             if ((is_int($key) && $field !== 'role_ids') || (! is_int($key) && ! in_array($key, self::FIELDS, true))) {

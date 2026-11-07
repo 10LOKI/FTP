@@ -72,6 +72,23 @@ class AuditTrailTest extends TestCase
         $this->assertStringNotContainsString('SECRET-', $event->fresh()->toJson());
     }
 
+    public function test_role_audit_preserves_complete_permission_lists_and_rejects_untyped_secrets(): void
+    {
+        $codes = array_map(fn (int $number): string => 'PERMISSION_'.$number, range(1, 1000));
+        $event = $this->event(['changes' => [
+            'before' => ['code' => 'WAREHOUSE', 'label' => 'Warehouse', 'permissions' => []],
+            'after' => ['permissions' => $codes],
+        ]]);
+        $this->assertSame(['code' => 'WAREHOUSE', 'label' => 'Warehouse', 'permissions' => []], $event->changes['before']);
+        $this->assertSame($codes, $event->changes['after']['permissions']);
+
+        $unsafe = $this->event(['changes' => ['after' => ['permissions' => [
+            'ROLE_MANAGE', 'PERMISSION_lowercase_1', ['password' => 'SECRET-PASSWORD'], 'secret-token', 42,
+        ]]]]);
+        $this->assertSame(['ROLE_MANAGE', 'PERMISSION_lowercase_1'], $unsafe->changes['after']['permissions']);
+        $this->assertStringNotContainsString('SECRET-', $unsafe->toJson());
+    }
+
     public static function mutations(): array
     {
         return ['update query' => ['update'], 'delete query' => ['delete']];

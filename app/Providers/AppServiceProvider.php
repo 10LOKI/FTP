@@ -4,8 +4,8 @@ namespace App\Providers;
 
 use App\Models\CustomerProfile;
 use App\Models\User;
-use App\Services\AuditContext;
 use App\Services\AccessPermissionCatalog;
+use App\Services\AuditContext;
 use App\Services\EffectivePermissions;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -64,7 +64,6 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('temporary-password', fn (Request $request): Limit => Limit::perMinute(5)
             ->by('temporary-password:'.($request->user()?->id ?? $request->ip())));
 
-            ->by('temporary-password:'.$request->user()->getAuthIdentifier()));
         RateLimiter::for('customer-login', function (Request $request): array {
             $identifier = $request->input('identifier');
             $identifier = is_string($identifier) ? Str::lower($identifier) : '';

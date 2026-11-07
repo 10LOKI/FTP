@@ -5,11 +5,10 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ResetEmployeeAccessRequest;
 use App\Http\Resources\EmployeeProvisioningResource;
 use App\Models\AuditEvent;
-use App\Models\CustomerProfile;
 use App\Models\EmployeeAccessDelivery;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\EffectivePermissions;
+use App\Services\AdministratorAccess;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -20,10 +19,7 @@ class EmployeeAccessResetController extends Controller
 {
     private function isUsableAdministrator(User $user): bool
     {
-        return ! $user->must_change_password
-            && ! CustomerProfile::where('user_id', $user->id)->where('approval', '!=', 'APPROUVE')->exists()
-            && app(EffectivePermissions::class)->allows($user, 'ROLE_MANAGE')
-            && app(EffectivePermissions::class)->allows($user, 'USER_ASSIGN_ROLE');
+        return app(AdministratorAccess::class)->isUsable($user);
     }
 
     public function __invoke(ResetEmployeeAccessRequest $request, User $user): JsonResponse

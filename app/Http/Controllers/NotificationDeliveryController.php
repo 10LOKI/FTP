@@ -43,7 +43,7 @@ class NotificationDeliveryController extends Controller
     {
         Gate::authorize('NOTIFICATION_RETRY');
         abort_unless(isset(self::SOURCES[$kind]), 404);
-        abort_if($kind === 'order' && ! config('notifications.order_received_enabled'), 409, 'Les notifications de commande ne sont pas encore activées.');
+
         if ($kind === 'employee') {
             Gate::authorize('USER_RESET_ACCESS');
         }
@@ -52,6 +52,7 @@ class NotificationDeliveryController extends Controller
         DB::transaction(function () use ($request, $kind, $delivery, $values): void {
             $row = DB::table(self::SOURCES[$kind])->where('id', $delivery)->lockForUpdate()->first();
             abort_unless($row !== null, 404);
+            abort_if($kind === 'order' && $row->type === 'order.received' && ! config('notifications.order_received_enabled'), 409, 'Les notifications de commande ne sont pas encore activées.');
             abort_if($kind === 'employee' && CarbonImmutable::parse($row->expires_at, 'UTC')->lessThanOrEqualTo(now('UTC')), 409, 'L’accès temporaire a expiré. Utilisez la procédure de réémission autorisée.');
             abort_unless($row->status === 'RETRY' && (int) $row->attempts === (int) $values['expected_attempts'], 409,
                 'Cet envoi a changé ou ne nécessite pas de reprise. Actualisez la liste.');

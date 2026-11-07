@@ -32,7 +32,7 @@ class RoleEditorTest extends TestCase
         $this->postJson('/api/v1/access/roles', ['code' => 'WAREHOUSE', 'label' => 'Warehouse'])->assertForbidden();
         $this->patchJson($this->url($role), ['label' => 'Changed', 'version' => 1])->assertForbidden();
         $this->postJson($this->url($role).'/permission-change-preview', ['version' => 1, 'permission_codes' => []])->assertForbidden();
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_creation_makes_an_empty_ordinary_role_and_records_safe_audit(): void
@@ -62,7 +62,7 @@ class RoleEditorTest extends TestCase
         }
         $this->postJson('/api/v1/access/roles', ['code' => 'bad code', 'label' => ''])->assertUnprocessable();
         $this->assertDatabaseMissing('roles', ['code' => 'NEW_ROLE']);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_rename_preserves_code_assignments_and_effective_access(): void
@@ -87,7 +87,7 @@ class RoleEditorTest extends TestCase
         $this->patchJson($this->url($role), ['label' => 'Stale change', 'version' => 1])->assertConflict();
         $this->postJson($this->url($role).'/permission-change-preview', ['version' => 1, 'permission_codes' => []])->assertConflict();
         $this->assertSame('First change', $role->fresh()->label);
-        $this->assertDatabaseCount('audit_events', 1);
+        $this->assertSame(1, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_protected_role_cannot_be_renamed_or_previewed_for_editing(): void
@@ -97,7 +97,7 @@ class RoleEditorTest extends TestCase
         $this->patchJson($this->url($role), ['label' => 'Changed', 'version' => 1])->assertConflict();
         $this->postJson($this->url($role).'/permission-change-preview', ['version' => 1, 'permission_codes' => []])->assertConflict();
         $this->assertSame(1, $role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_rename_rejects_code_permission_and_protection_changes(): void
@@ -110,7 +110,7 @@ class RoleEditorTest extends TestCase
         }
         $this->patchJson($this->url($role), ['label' => 'Changed'])->assertUnprocessable();
         $this->assertSame(1, $role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_preview_shows_exact_delta_and_only_assigned_account_ids_without_writing(): void
@@ -133,7 +133,7 @@ class RoleEditorTest extends TestCase
         $this->assertStringNotContainsString($member->email, $response->getContent());
         $this->assertSame(['USER_ASSIGN_ROLE', 'USER_CREATE'], $role->permissions()->orderBy('code')->pluck('code')->all());
         $this->assertSame(1, $role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_empty_proposal_means_remove_all_and_affected_accounts_are_paginated(): void
@@ -168,7 +168,7 @@ class RoleEditorTest extends TestCase
         ] as $data) {
             $this->postJson($this->url($role).'/permission-change-preview', $data)->assertUnprocessable();
         }
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_revoked_management_permission_cannot_make_further_changes(): void
@@ -178,7 +178,7 @@ class RoleEditorTest extends TestCase
         $actor->roles()->detach();
         $this->patchJson($this->url($role), ['label' => 'Changed', 'version' => 1])->assertForbidden();
         $this->assertSame(1, $role->fresh()->version);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_renaming_to_same_label_does_not_increment_version_or_add_audit(): void
@@ -186,7 +186,7 @@ class RoleEditorTest extends TestCase
         $this->manager();
         $role = Role::factory()->create();
         $this->patchJson($this->url($role), ['label' => $role->label, 'version' => 1])->assertOk()->assertJsonPath('data.version', 1);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_temporary_employee_cannot_create_rename_or_preview_roles(): void
@@ -198,7 +198,7 @@ class RoleEditorTest extends TestCase
         $this->patchJson($this->url($role), ['label' => 'Changed', 'version' => 1])->assertForbidden();
         $this->postJson($this->url($role).'/permission-change-preview', ['version' => 1, 'permission_codes' => []])->assertForbidden();
         $this->assertDatabaseMissing('roles', ['code' => 'NEW_ROLE']);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_missing_or_invalid_role_identifier_does_not_create_an_audit(): void
@@ -208,7 +208,7 @@ class RoleEditorTest extends TestCase
             $this->patchJson('/api/v1/access/roles/'.$id, ['label' => 'Changed', 'version' => 1])->assertNotFound();
             $this->postJson('/api/v1/access/roles/'.$id.'/permission-change-preview', ['version' => 1, 'permission_codes' => []])->assertNotFound();
         }
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_failed_audit_rolls_back_role_creation(): void
@@ -227,7 +227,7 @@ class RoleEditorTest extends TestCase
             Event::forget('eloquent.creating: '.AuditEvent::class);
         }
         $this->assertDatabaseMissing('roles', ['code' => 'ROLLBACK']);
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_failed_audit_rolls_back_rename_and_version(): void

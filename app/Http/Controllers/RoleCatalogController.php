@@ -23,3 +23,4 @@ class RoleCatalogController extends Controller
         );
     }
 }
+

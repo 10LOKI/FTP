@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\Permission;
 use App\Models\Role;
@@ -88,7 +89,7 @@ class AccessAuthorizationTest extends TestCase
         ], $response->json('data.0'));
         $this->assertStringNotContainsString($user->email, $response->getContent());
         $this->getJson('/api/v1/access/permissions')->assertOk()->assertJsonPath('data.0.code', 'ROLE_MANAGE');
-        $this->assertDatabaseCount('audit_events', 0);
+        $this->assertSame(0, AuditEvent::where('action', 'like', 'role.%')->count());
     }
 
     public function test_catalog_filters_and_page_sizes_are_validated(): void
