@@ -552,3 +552,67 @@ Le journal distingue l’ouverture de la console (`audit.page_view`), la lecture
 Le journal utilise une pagination par curseur `(occurred_at, id)` : ses propres événements de lecture et les nouveaux événements ne décalent pas les lignes déjà parcourues. Appliquer les filtres repart de la première page ; un curseur invalide est refusé (422). Les listes d’envoi gardent leur pagination par page.
 
 Vérification du 6 novembre 2026 : Pint et build réussis ; suite Docker SQLite complète, 475 tests / 2364 assertions, six sauts réservés à MySQL/pcntl. Les 82 tests ciblés sur MySQL 8.4 jetable passent (566 assertions), dont ces six cas de concurrence. Le `phpunit.xml` impose SQLite avec `force=true` : une simple variable d’environnement ne suffit pas pour exécuter MySQL. Utiliser une configuration de test distincte sans les entrées `server DB_*` forcées, uniquement contre une base de test jetable ; conserver les autres paramètres testing, mail/cache/session array. Ne pas lancer les migrations destructives des tests contre la base de développement.
+
+## Stock par dépôt — FTP-24
+
+`/gestion/stocks` fournit la console React : dépôts/emplacements, recherche produit, réception, correction justifiée, contrôle, transfert, seuils, alertes et journal paginé. Les capacités **effectives** sont `STOCK_VIEW`, `STOCK_RECEIVE`, `STOCK_ADJUST`, `STOCK_TRANSFER`, `STOCK_STRUCTURE_MANAGE`. Le seeder `AccessPermissionSeeder` ajoute leurs définitions, sans les attribuer à un rôle ni changer les comptes existants. Un client, même approuvé, n’accède pas aux données internes de stock.
+
+Les quantités sont des **unités entières** (0 à 2147483647), séparées en `physical` vendable, `reserved`, `control` et `rejected` non réintégrable. `available = physical - reserved >= 0`. Le contrôle et le non-réintégrable sont exclus de la disponibilité. La base impose les invariants et refuse toute modification/suppression des mouvements. Une correction d’historique passe par un nouveau mouvement compensatoire justifié, jamais par la réécriture du journal.
+
+API de session (cookie, CSRF pour POST, `Accept: application/json`), réponses privées `no-store` :
+
+| Méthode et chemin | Entrées et résultat |
+| --- | --- |
+| `GET /api/v1/stock/warehouses` | Dépôts paginés (`page`, 50/page), UUID, code, nom, actif, version. |
+| `GET /api/v1/stock/locations?warehouse_id={uuid}` | Emplacements du dépôt uniquement, `page`, 50/page. |
+| `GET /api/v1/stock/products?search={texte}` | Recherche SKU/référence exacts ou désignation partielle, `page`, 20/page ; aucun coût d’achat. |
+| `GET /api/v1/stock/balances` | Filtres `warehouse_id`, `product_id`, `page`, 30/page ; quantités, emplacement, seuil et version. L’absence de ligne vaut zéro, version0 pour une première écriture. |
+| `GET /api/v1/stock/movements?balance_id={uuid}` | Journal paginé 30/page : variations des quatre compartiments, avant/après, auteur, date UTC, motif, pièce source, opération. |
+| `GET /api/v1/stock/alerts` | Alertes actives, filtre `warehouse_id`, `page`, 30/page ; dépôt/produit, seuil et quantité disponible observée. |
+| `POST /api/v1/stock/actions/{action}` | Commandes décrites ci-dessous. UUID obligatoire dans l’en-tête `Idempotency-Key`, réutilisé lors d’une reprise réseau du **même** corps. |
+
+Commandes v1 :
+
+- `warehouse` : `code` unique (lettres/chiffres/point/tiret/underscore), `name`, `active` ; modification avec `warehouse_id` et `expected_version` (à partir de1). Un dépôt contenant des quantités ne peut pas être désactivé.
+- `location` : `warehouse_id`, `code` unique dans ce dépôt, `aisle`/`shelf`/`level` facultatifs. Un produit/dépôt peut avoir un emplacement principal ; aucun stock n’est dupliqué par emplacement.
+- `receive` : `warehouse_id`, `product_id`, `expected_version`, `quantity` positive, `bucket=physical|control`, `reason`, `source_reference` (pièce d’achat/réception). Une réception en contrôle n’est pas vendable.
+- `adjust` : mêmes champs, quantité positive ou négative non nulle, `bucket=physical|control|rejected`. Justification obligatoire ; aucune modification directe du réservé, aucun passage sous le réservé.
+- `inspect` : dépôt/produit/version, `quantity` positive, `destination=physical|rejected`, motif et pièce source. Déplace la quantité du contrôle vers le compartiment décidé, sans créer d’unités.
+- `transfer` : dépôt/produit/version, `destination_warehouse_id`, `destination_expected_version`, quantité positive, motif et pièce source. Source et destination distinctes ; seule la quantité disponible est transférable, le réservé reste à la source. Les deux mouvements partagent `operation_id`.
+- `configure` : dépôt/produit/version, `location_id` (UUID du même dépôt ou null), `threshold_quantity` (entier ou null) et `threshold_basis=available` (ou null avec seuil null). Ne modifie aucune quantité.
+
+Exemple Postman, réception (version0 si la paire produit/dépôt n’existe pas) :
+
+```json
+{
+  "warehouse_id": "00000000-0000-4000-8000-000000000001",
+  "product_id": 1,
+  "expected_version": 0,
+  "quantity": 100,
+  "bucket": "physical",
+  "reason": "Réception contrôlée de l’achat",
+  "source_reference": "ACH-2026-001"
+}
+```
+
+L’opération retourne `data.operation_id` et les versions/quantités résultantes (ou identifiant dépôt/emplacement). Rejouer la même clé/corps/acteur retourne le résultat historique sans nouvelle écriture. Clé réutilisée pour une autre action, acteur ou corps :409. La permission est revérifiée avant le rejeu. Version périmée, disponibilité insuffisante, conflit concurrent :409 ; champs inconnus, motif vide, mauvaise quantité, clé absente ou emplacement étranger :422 ; permission absente :403 ; visiteur :401. Aucune route PATCH/DELETE des balances, réservations ou mouvements n’est exposée.
+
+Chaque mutation écrit ses mouvements et son audit de succès dans sa transaction. Une panne, y compris d’audit après le premier mouvement d’un transfert, annule les deux côtés, les alertes et la clé d’opération. Le middleware d’audit existant conserve les refus/échecs HTTP sans enregistrer les corps ou les exceptions brutes. Ordre de verrouillage : clé d’opération, puis dépôts UUID triés et produits numériques triés, puis balances ; l’orchestrateur de commande possède d’abord le verrou de sa commande. Les mutations autonomes ont un budget de trois tentatives pour les conflits SQL réessayables ; après épuisement,409 explicite. Un deadlock dans une transaction de commande remonte en409 : annuler et reprendre la transaction complète, jamais seulement son fragment de stock.
+
+**Décision Khalid du 8 novembre2026** : alerte lorsque **disponible <= seuil**, seuil propre au produit/dépôt (exemple20, aucune valeur universelle). Une seule occurrence active par balance ; les mouvements/réservations actualisent sa quantité, un réapprovisionnement au-dessus du seuil la résout, un nouveau franchissement ouvre une nouvelle occurrence. Les alertes sont persistantes et consultables dans l’application. Aucun email, destinataire ou achat automatique n’est activé. Seuil null : alerte désactivée, sans effacer l’historique des anciennes occurrences.
+
+### Contrat partagé avec FTP-23/25/26/29/30
+
+Les UUID dépôt/balance/emplacement viennent des API ci-dessus. Le produit garde son identifiant canonique existant. Les lignes d’une commande conservent leur UUID et le conditionnement historique ; convertir explicitement `quantity * units_per_package` en unités avant d’appeler le stock.
+
+- `WarehouseStock::reserve(User $actor, int $orderId, int $orderVersion, array $lines, string $requestKey)` : droit réel `ORDER_CONFIRM`, transaction extérieure **obligatoire**, commande verrouillée/confirmée `CONFIRMEE` et client approuvé. Chaque ligne contient `warehouse_id`, `product_id`, `line_id`, `quantity` en unités. Le service réserve au plus le disponible et retourne `allocations` avec UUID de réservation (ou null), réservé et manque explicite. La somme réservée/consommée d’une ligne ne dépasse jamais la quantité commandée. Aucune décrémentation physique. Le caller FTP-23 valide l’accord commercial, change l’état et enregistre son audit dans **cette même transaction** ; un échec annule aussi le stock.
+- `WarehouseStock::releaseCancelledOrder(User $actor, int $orderId, int $orderVersion, string $requestKey)` : droit réel `RESERVATION_CANCEL`, même transaction que l’annulation. Refuse une commande encore prête/confirmée ; exige `ANNULEE` et la version attendue. Libère uniquement le reste non consommé. Ne rajoute jamais d’unités physiques. Une révision partielle autorisée doit encore être orchestrée dans FTP-25 ; aucun bouton de libération autonome n’est livré.
+- `stock_reservations` conserve `order_id`, `line_id`, `balance_id`, `quantity`, `released`, `consumed`, `order_version`, `operation_id`. Restant actif = quantity - released - consumed. Ces tables ne sont pas une API d’écriture directe : l’orchestrateur doit passer par le service transactionnel et ses droits.
+- **Départ BL / FTP-26** : contrat à brancher sur le vrai lot de départ et ses lignes/réservations. Pour q unités réellement expédiées, un seul mouvement `departure` réduit physical et reserved de q et augmente consumed de q, lié au BL/lot, auteur et clé unique ; q ne dépasse ni préparé ni réservé actif. L’émission/réimpression de facture et les scans ne font aucun mouvement. Aucun endpoint de départ basé sur un simple texte « BL » n’est livré avant la présence du vrai modèle de BL et sa validation.
+- **Retours** : arrivée en `control` via réception avec pièce source, puis inspection en `physical` ou `rejected` sous `STOCK_ADJUST`. Les règles d’origine d’achat/BL, plafonds de retour et avoirs restent chez FTP-29/30 ; cette opération de stock seule ne valide pas un retour commercial et ne crée pas un crédit financier.
+
+Les services de réservation/libération sont réels et testés sur la base. Les fixtures de commandes confirmées/annulées permettent leur qualification isolée ; elles ne démontrent pas le parcours réel FTP-23/25/26, encore absent de develop au démarrage. Cette intégration, le départ BL et la recette métier restent à qualifier avant le Done global.
+
+Démonstration locale facultative, sans compte, permission attribuée ou stock inventé : `php artisan db:seed --class=WarehouseStockDemoSeeder --no-interaction` (local/testing uniquement). Deux dépôts `DEMO-A/B` et leurs emplacements sont créés de façon répétable. Effectuer ensuite les vraies réceptions avec un acteur autorisé et une pièce source.
+
+Vérification du 8 novembre2026, PHP8.4.27/Laravel13.39/MySQL8.4 : Pint et build passent ; image Docker finale reconstruite, suite SQLite complète **668 tests /3578 assertions**,12 sauts réservés à MySQL/pcntl ; tests FTP-24 sur MySQL jetable **22 tests /187 assertions**, incluant quatre courses réelles (rejeu, dernière unité, transferts concurrents et opposés). Commandes : `vendor/bin/pint --dirty --format agent`, `npm run build`, `DB_CONNECTION=sqlite DB_DATABASE=:memory: vendor/bin/phpunit` ; qualification MySQL avec configuration distincte retirant les seuls `server DB_*` forcés, clé de test éphémère et base jetable. Chrome : vraie session employé sur SQLite isolée, réception par clavier100→105 et journal+5, alerte à105, vue iPhone SE375×667 inspectée après corrections CSS/pattern. Ces preuves ne valent pas recette sur smartphone physique, douchette, ni intégration réelle de confirmation/départ BL.

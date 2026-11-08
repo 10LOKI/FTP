@@ -10,6 +10,8 @@ class AuditSanitizer
         'approval_event_id', 'trigger_event_id', 'schema_version', 'publication', 'sale_price', 'percentage',
         'currency', 'tax_basis', 'reference', 'original_reference', 'brand', 'verified_at', 'starts_at', 'ends_at',
         'state', 'kind', 'value', 'quantity', 'units_per_package', 'before_quantity', 'after_quantity',
+        'warehouse_id', 'location_id', 'operation_id', 'physical', 'reserved', 'control', 'rejected',
+        'available', 'threshold_quantity', 'threshold_basis', 'active', 'order_id',
         'line_id', 'title', 'sku', 'designation', 'part_brand', 'category', 'hs_code', 'net_weight', 'weight_unit', 'purchase_price_changed', 'barcodes_count', 'compatibilities_count', 'count', 'row_count', 'month', 'channel', 'notification_type',
     ];
 

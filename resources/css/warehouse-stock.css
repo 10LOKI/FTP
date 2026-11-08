@@ -1,0 +1,28 @@
+.stock-console { display: grid; gap: 1.5rem; }
+.stock-console section { background: white; border: 1px solid #dce2e8; border-radius: .75rem; padding: 1.25rem; }
+.stock-console h2 { margin-top: 0; }
+.stock-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
+.stock-console label { display: grid; gap: .35rem; align-content: start; }
+.stock-console input, .stock-console select { width: 100%; min-width: 0; box-sizing: border-box; padding: .65rem; border: 1px solid #7b8794; border-radius: .3rem; font: inherit; background: white; }
+.stock-console button { min-height: 2.75rem; margin: .5rem .5rem .25rem 0; }
+.stock-console button[aria-pressed=true] { background: #183d56; color: white; }
+.stock-console button:disabled { opacity: .6; cursor: wait; }
+.stock-console :focus-visible { outline: 3px solid #ad5b00; outline-offset: 3px; }
+.stock-scroll { overflow-x: auto; }
+.stock-console table { width: 100%; border-collapse: collapse; }
+.stock-console th, .stock-console td { text-align: left; border-bottom: 1px solid #dce2e8; padding: .75rem; vertical-align: top; }
+.stock-console th { white-space: nowrap; }
+.stock-counts { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
+.stock-counts div { flex: 1 1 8rem; padding: .75rem; border: 1px solid #dce2e8; border-radius: .4rem; }
+.stock-counts dt { font-size: .9rem; }
+.stock-counts dd { font-weight: 700; font-size: 1.6rem; margin: .5rem 0 0; }
+.stock-alert { border-left: .3rem solid #ad5b00; padding: .75rem; background: #fff4dc; }
+.stock-feedback { padding: 1rem; border: 1px solid #457962; border-radius: .4rem; }
+.stock-feedback[data-error=true] { border-color: #a92828; background: #fff4f4; }
+.stock-console small { color: #4c5965; }
+
+.stock-console, .stock-console > *, .stock-grid > *, .stock-console fieldset { min-width: 0; }
+.stock-console fieldset { margin: 0; }
+.stock-feedback, .stock-console section { overflow-wrap: anywhere; }
+.stock-console button { max-width: 100%; white-space: normal; }
+.stock-scroll { max-width: 100%; }
