@@ -12,10 +12,26 @@ use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\PublicCatalogueController;
 use App\Http\Controllers\PublicContactController;
+use App\Http\Controllers\WarehouseStockController;
 use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [PublicCatalogueController::class, 'home'])->name('public.home');
+
+Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/gestion/stocks', [WarehouseStockController::class, 'page'])->name('stock.page');
+    Route::prefix('api/v1/stock')->name('stock.')->group(function (): void {
+        Route::get('/warehouses', [WarehouseStockController::class, 'structure'])->name('warehouses');
+        Route::get('/locations', [WarehouseStockController::class, 'locations'])->name('locations');
+        Route::get('/products', [WarehouseStockController::class, 'products'])->name('products');
+        Route::get('/balances', [WarehouseStockController::class, 'index'])->name('balances');
+        Route::get('/movements', [WarehouseStockController::class, 'movements'])->name('movements');
+        Route::get('/alerts', [WarehouseStockController::class, 'alerts'])->name('alerts');
+        Route::post('/actions/{action}', [WarehouseStockController::class, 'mutate'])
+            ->whereIn('action', ['warehouse', 'location', 'configure', 'receive', 'adjust', 'inspect', 'transfer'])
+            ->middleware('throttle:30,1')->name('mutate');
+    });
+});
 Route::get('/catalogue', [PublicCatalogueController::class, 'catalogue'])->name('public.catalogue');
 Route::get('/catalogue/{product}', [PublicCatalogueController::class, 'detail'])
     ->whereNumber('product')->name('public.product');
