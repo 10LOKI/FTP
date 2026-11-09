@@ -4,7 +4,7 @@ import { pricingRequest } from './pricing-request.js';
 import '../css/warehouse-stock.css';
 
 const labels = { physical: 'Physique vendable', reserved: 'Réservé', available: 'Disponible', control: 'En contrôle', rejected: 'Non réintégrable' };
-const kinds = { receipt: 'Réception', adjustment: 'Correction', inspection: 'Contrôle', transfer_out: 'Transfert sortant', transfer_in: 'Transfert entrant', reservation: 'Réservation', release: 'Libération' };
+const kinds = { receipt: 'Réception', adjustment: 'Correction', inspection: 'Contrôle', transfer_out: 'Transfert sortant', transfer_in: 'Transfert entrant', reservation: 'Réservation', release: 'Libération', dispatch: 'Départ BL' };
 const operations = [['receive', 'Réception', 'STOCK_RECEIVE'], ['adjust', 'Correction', 'STOCK_ADJUST'], ['inspect', 'Résultat de contrôle', 'STOCK_ADJUST'], ['transfer', 'Transfert', 'STOCK_TRANSFER'], ['configure', 'Emplacement et seuil', 'STOCK_STRUCTURE_MANAGE']];
 function Pages({ page, onPage, disabled }) {
     if (!page || page.last_page <= 1) return null;

@@ -22,5 +22,8 @@ class AccessPermissionCatalog
         'STOCK_STRUCTURE_MANAGE' => 'Gérer les dépôts, emplacements et seuils',
         'ORDER_CONFIRM' => 'Confirmer une commande et réserver son stock',
         'RESERVATION_CANCEL' => 'Libérer les réservations d’une commande annulée',
+        'DELIVERY_PREPARE' => 'Prendre et préparer un bon de livraison',
+        'DELIVERY_TRANSFER' => 'Transférer un bon de livraison entre préparateurs',
+        'DELIVERY_DEPARTURE_CONFIRM' => 'Constater le départ réel et sortir le stock',
     ];
 }
