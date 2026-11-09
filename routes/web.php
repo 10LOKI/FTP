@@ -5,6 +5,7 @@ use App\Http\Controllers\CartController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
+use App\Http\Controllers\DeliveryPreparationController;
 use App\Http\Controllers\EmployeeSessionController;
 use App\Http\Controllers\NotificationDeliveryController;
 use App\Http\Controllers\ProductController;
@@ -19,6 +20,17 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', [PublicCatalogueController::class, 'home'])->name('public.home');
 
 Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/gestion/preparations', [DeliveryPreparationController::class, 'page'])->name('delivery.page');
+    Route::prefix('api/v1/deliveries')->middleware('throttle:customer-commerce')->name('delivery.')->group(function (): void {
+        Route::get('/ready', [DeliveryPreparationController::class, 'ready'])->name('ready');
+        Route::get('/batches', [DeliveryPreparationController::class, 'index'])->name('index');
+        Route::post('/claim', [DeliveryPreparationController::class, 'mutate'])->defaults('action', 'claim')->name('claim');
+        Route::post('/batches/{batch}/scan', [DeliveryPreparationController::class, 'mutate'])->whereUuid('batch')->defaults('action', 'scan')->name('scan');
+        Route::post('/batches/{batch}/prepare', [DeliveryPreparationController::class, 'mutate'])->whereUuid('batch')->defaults('action', 'prepare')->name('prepare');
+        Route::post('/batches/{batch}/transfer', [DeliveryPreparationController::class, 'mutate'])->whereUuid('batch')->defaults('action', 'transfer')->name('transfer');
+        Route::post('/batches/{batch}/dispatch', [DeliveryPreparationController::class, 'mutate'])->whereUuid('batch')->defaults('action', 'dispatch')->name('dispatch');
+        Route::get('/batches/{batch}/document', [DeliveryPreparationController::class, 'document'])->whereUuid('batch')->name('document');
+    });
     Route::get('/gestion/stocks', [WarehouseStockController::class, 'page'])->name('stock.page');
     Route::prefix('api/v1/stock')->name('stock.')->group(function (): void {
         Route::get('/warehouses', [WarehouseStockController::class, 'structure'])->name('warehouses');

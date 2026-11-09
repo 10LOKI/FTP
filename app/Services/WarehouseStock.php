@@ -181,6 +181,52 @@ class WarehouseStock
         });
     }
 
+    /** Consume reserved base units at the separately validated real departure.
+     * The delivery orchestrator owns the surrounding transaction and batch locks.
+     *
+     * @param  list<array{line_id: string, quantity: int}>  $lines
+     * @return array<string, mixed>
+     */
+    public function dispatchBatch(User $actor, int $orderId, string $warehouseId, array $lines, string $requestKey, string $deliveryNumber): array
+    {
+        $this->requireOrderTransaction();
+        $this->authorize($actor, 'DELIVERY_DEPARTURE_CONFIRM');
+        $warehouseId = Str::lower($warehouseId);
+        $lines = array_map(fn (array $line): array => ['line_id' => Str::lower($line['line_id']), 'quantity' => (int) $line['quantity']], $lines);
+
+        return $this->operation($actor, 'dispatch', ['order_id' => $orderId, 'warehouse_id' => $warehouseId, 'lines' => $lines, 'delivery_number' => $deliveryNumber], $requestKey, function (string $operationId) use ($actor, $orderId, $warehouseId, $lines, $deliveryNumber): array {
+            DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->firstOrFail();
+            $this->lockWarehouses([$warehouseId], false);
+            $result = [];
+            foreach ($lines as $line) {
+                $remaining = $line['quantity'];
+                abort_if($remaining < 1, 422, 'Une quantité préparée doit être positive.');
+                $reservations = DB::table('stock_reservations as r')->join('stock_balances as b', 'b.id', '=', 'r.balance_id')
+                    ->where('r.order_id', $orderId)->where('r.line_id', $line['line_id'])->where('b.warehouse_id', $warehouseId)
+                    ->orderBy('r.created_at')->orderBy('r.id')->lockForUpdate()
+                    ->get(['r.id', 'r.balance_id', 'r.quantity', 'r.released', 'r.consumed']);
+                abort_if($reservations->sum(fn (object $reservation): int => (int) $reservation->quantity - (int) $reservation->released - (int) $reservation->consumed) < $remaining, 409, 'La quantité préparée dépasse la réservation active.');
+                foreach ($reservations as $reservation) {
+                    $available = (int) $reservation->quantity - (int) $reservation->released - (int) $reservation->consumed;
+                    $consume = min($remaining, $available);
+                    if ($consume === 0) {
+                        continue;
+                    }
+                    $balance = StockBalance::whereKey($reservation->balance_id)->lockForUpdate()->firstOrFail();
+                    $this->move($actor, $operationId, $balance, 'dispatch', ['physical' => -$consume, 'reserved' => -$consume], ['reason' => 'Départ réel validé', 'source_reference' => $deliveryNumber]);
+                    DB::table('stock_reservations')->where('id', $reservation->id)->update(['consumed' => (int) $reservation->consumed + $consume, 'updated_at' => now('UTC')]);
+                    $remaining -= $consume;
+                    if ($remaining === 0) {
+                        break;
+                    }
+                }
+                $result[] = ['line_id' => $line['line_id'], 'quantity' => $line['quantity']];
+            }
+
+            return ['order_id' => $orderId, 'warehouse_id' => $warehouseId, 'delivery_number' => $deliveryNumber, 'lines' => $result];
+        });
+    }
+
     private function requireOrderTransaction(): void
     {
         if (DB::transactionLevel() === 0) {
