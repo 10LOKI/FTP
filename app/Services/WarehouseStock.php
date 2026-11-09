@@ -227,6 +227,24 @@ class WarehouseStock
         });
     }
 
+    /** @param list<array{product_id:int,quantity:int}> $lines */
+    public function dispatchSupplierReturn(User $actor, string $warehouseId, array $lines, string $requestKey, string $number): array
+    {
+        $this->requireOrderTransaction();
+        $this->authorize($actor, 'SUPPLIER_RETURN_MANAGE');
+
+        return $this->operation($actor, 'supplier_return', ['warehouse_id' => $warehouseId, 'lines' => $lines, 'number' => $number], $requestKey, function (string $operationId) use ($actor, $warehouseId, $lines, $number): array {
+            $this->lockWarehouses([$warehouseId], false);
+            foreach ($lines as $line) {
+                $balance = $this->balance($warehouseId, (int) $line['product_id']);
+                abort_if((int) $line['quantity'] > $balance->physical - $balance->reserved, 409, 'Stock disponible insuffisant pour ce retour fournisseur.');
+                $this->move($actor, $operationId, $balance, 'supplier_return', ['physical' => -(int) $line['quantity']], ['reason' => 'Départ retour fournisseur', 'source_reference' => $number]);
+            }
+
+            return ['warehouse_id' => $warehouseId, 'number' => $number, 'lines' => $lines];
+        });
+    }
+
     private function requireOrderTransaction(): void
     {
         if (DB::transactionLevel() === 0) {

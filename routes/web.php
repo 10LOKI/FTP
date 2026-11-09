@@ -13,6 +13,7 @@ use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\PublicCatalogueController;
 use App\Http\Controllers\PublicContactController;
+use App\Http\Controllers\SupplierReturnController;
 use App\Http\Controllers\WarehouseStockController;
 use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Support\Facades\Route;
@@ -20,6 +21,17 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', [PublicCatalogueController::class, 'home'])->name('public.home');
 
 Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): void {
+    Route::get('/gestion/retours-fournisseurs', [SupplierReturnController::class, 'page'])->name('supplier-returns.page');
+    Route::prefix('api/v1/supplier-returns')->middleware('throttle:customer-commerce')->group(function (): void {
+        Route::get('/', [SupplierReturnController::class, 'index']);
+        Route::post('/suppliers', [SupplierReturnController::class, 'mutate'])->defaults('action', 'supplier');
+        Route::post('/purchases', [SupplierReturnController::class, 'mutate'])->defaults('action', 'purchase');
+        Route::post('/adjustments', [SupplierReturnController::class, 'mutate'])->defaults('action', 'adjustment');
+        Route::post('/', [SupplierReturnController::class, 'mutate'])->defaults('action', 'request');
+        Route::post('/{return}/dispatch', [SupplierReturnController::class, 'mutate'])->whereUuid('return')->defaults('action', 'dispatch');
+        Route::post('/{return}/credit', [SupplierReturnController::class, 'mutate'])->whereUuid('return')->defaults('action', 'credit');
+        Route::get('/{return}/document', [SupplierReturnController::class, 'document'])->whereUuid('return');
+    });
     Route::get('/gestion/preparations', [DeliveryPreparationController::class, 'page'])->name('delivery.page');
     Route::prefix('api/v1/deliveries')->middleware('throttle:customer-commerce')->name('delivery.')->group(function (): void {
         Route::get('/ready', [DeliveryPreparationController::class, 'ready'])->name('ready');

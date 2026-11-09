@@ -25,5 +25,8 @@ class AccessPermissionCatalog
         'DELIVERY_PREPARE' => 'Prendre et préparer un bon de livraison',
         'DELIVERY_TRANSFER' => 'Transférer un bon de livraison entre préparateurs',
         'DELIVERY_DEPARTURE_CONFIRM' => 'Constater le départ réel et sortir le stock',
+        'SUPPLIER_MANAGE' => 'Gérer les fournisseurs et origines d’achat',
+        'SUPPLIER_RETURN_MANAGE' => 'Préparer et expédier les retours fournisseur',
+        'SUPPLIER_CREDIT_MANAGE' => 'Accepter/refuser les avoirs et ajuster le solde fournisseur',
     ];
 }
