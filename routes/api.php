@@ -16,6 +16,7 @@ use App\Http\Controllers\EmployeeProvisioningController;
 use App\Http\Controllers\RoleCatalogController;
 use App\Http\Controllers\RoleDeletionController;
 use App\Http\Controllers\RoleEditorController;
+use App\Http\Controllers\SalesReviewController;
 use App\Http\Middleware\AuditCartRequest;
 use App\Http\Middleware\AuditCustomerApprovalDecision;
 use App\Http\Middleware\AuditCustomerOrderRequest;
@@ -24,6 +25,11 @@ use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('v1/sales/orders')->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'throttle:customer-commerce'])->group(function (): void {
+    Route::get('/', [SalesReviewController::class, 'index'])->name('sales.review.index');
+    Route::get('/{order}', [SalesReviewController::class, 'show'])->whereNumber('order')->name('sales.review.show');
+});
 
 Route::prefix('v1/me/orders')->middleware(['throttle:customer-commerce', AuditCustomerOrderRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/', [CustomerOrderController::class, 'index'])->name('customer.orders.index');

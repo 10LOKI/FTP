@@ -13,10 +13,14 @@ use App\Http\Controllers\ProductReferenceController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\PublicCatalogueController;
 use App\Http\Controllers\PublicContactController;
+use App\Http\Controllers\SalesReviewController;
 use App\Http\Controllers\SupplierReturnController;
 use App\Http\Controllers\WarehouseStockController;
 use App\Http\Middleware\EnsureCustomerApproved;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/gestion/commandes', [SalesReviewController::class, 'page'])
+    ->middleware(['auth', EnsureCustomerApproved::class])->name('sales.review.page');
 
 Route::get('/', [PublicCatalogueController::class, 'home'])->name('public.home');
 
