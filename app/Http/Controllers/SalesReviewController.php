@@ -80,6 +80,15 @@ class SalesReviewController extends Controller
         $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
         $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')
             ->get(['id', 'actor_id', 'outcome', 'happened_at', 'note', 'order_version']);
+        $data['revisions'] = DB::table('sales_order_revisions')->where('order_id', $order)->orderBy('order_version')
+            ->get(['id', 'actor_id', 'kind', 'before', 'after', 'reason', 'order_version', 'created_at'])
+            ->map(function (object $revision): array {
+                return ['id' => $revision->id, 'actor_id' => (string) $revision->actor_id, 'kind' => $revision->kind,
+                    'before' => json_decode($revision->before, true, 512, JSON_THROW_ON_ERROR),
+                    'after' => json_decode($revision->after, true, 512, JSON_THROW_ON_ERROR),
+                    'reason' => $revision->reason, 'order_version' => (int) $revision->order_version,
+                    'created_at' => $revision->created_at, 'requires_agreement' => true];
+            });
 
         return response()->json(['data' => $data])->header('Cache-Control', 'private, no-store');
     }
@@ -90,6 +99,29 @@ class SalesReviewController extends Controller
         $values = $request->validate(['expected_version' => ['required', 'integer', 'min:1', 'max:4294967293']]);
 
         return response()->json(['data' => $reviews->claim($request->user(), $order, (int) $values['expected_version'])])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function proposeRevision(Request $request, int $order, SalesOrderReview $reviews): JsonResponse
+    {
+        $this->authorizeReview($request);
+        $kind = $request->validate(['kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address'])]])['kind'];
+        $rules = [
+            'kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address'])],
+            'request_key' => ['required', 'uuid'], 'expected_version' => ['required', 'integer', 'min:1', 'max:4294967293'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ];
+        if ($kind === 'contact') {
+            $rules += ['changes' => ['required', 'array:name,email,phone'],
+                'changes.name' => ['required', 'string', 'max:160'], 'changes.email' => ['required', 'email', 'max:254'],
+                'changes.phone' => ['required', 'string', 'max:40']];
+        } else {
+            $rules += ['changes' => ['required', 'array:address,city,postal_code,country'],
+                'changes.address' => ['required', 'string', 'max:500'], 'changes.city' => ['required', 'string', 'max:120'],
+                'changes.country' => ['required', 'string', 'max:120'], 'changes.postal_code' => ['nullable', 'string', 'max:30']];
+        }
+
+        return response()->json(['data' => $reviews->proposeRevision($request->user(), $order, $request->validate($rules))])
             ->header('Cache-Control', 'private, no-store');
     }
 

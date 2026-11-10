@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -72,6 +73,45 @@ class SalesOrderReview
             $this->audit($actor, $orderId, 'sales.call_recorded', $version);
 
             return ['call_id' => $id, 'version' => $version, 'replayed' => false];
+        }, 3);
+    }
+
+    /** @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    public function proposeRevision(User $actor, int $orderId, array $values): array
+    {
+        $this->authorize($actor);
+        $key = Str::lower($values['request_key']);
+        $changes = $values['changes'];
+        ksort($changes);
+        $hash = hash('sha256', json_encode([(int) $values['expected_version'], $values['kind'], $changes, $values['reason']], JSON_THROW_ON_ERROR));
+
+        return DB::transaction(function () use ($actor, $orderId, $values, $key, $changes, $hash): array {
+            $order = DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->first();
+            abort_unless($order !== null, 404);
+            $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
+            abort_unless($review !== null && (int) $review->claimed_by === $actor->id, 403);
+            $existing = DB::table('sales_order_revisions')->where('order_id', $orderId)->where('request_key', $key)->first();
+            if ($existing !== null) {
+                abort_unless(hash_equals($existing->request_hash, $hash), 409, 'Clé déjà utilisée pour une autre révision.');
+
+                return ['revision_id' => $existing->id, 'version' => (int) $existing->order_version, 'requires_agreement' => true, 'replayed' => true];
+            }
+            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
+            $previous = DB::table('sales_order_revisions')->where('order_id', $orderId)->where('kind', $values['kind'])->orderByDesc('order_version')->first();
+            $fields = $values['kind'] === 'contact' ? ['name', 'email', 'phone'] : ['address', 'city', 'postal_code', 'country'];
+            $before = Arr::only(json_decode($previous?->after ?? $order->{$values['kind']}, true, 512, JSON_THROW_ON_ERROR), $fields);
+            $id = (string) Str::uuid();
+            $version = (int) $order->version + 1;
+            DB::table('sales_order_revisions')->insert(['id' => $id, 'order_id' => $orderId, 'actor_id' => $actor->id,
+                'request_key' => $key, 'request_hash' => $hash, 'kind' => $values['kind'],
+                'before' => json_encode($before, JSON_THROW_ON_ERROR), 'after' => json_encode($changes, JSON_THROW_ON_ERROR),
+                'reason' => $values['reason'], 'order_version' => $version, 'created_at' => now('UTC')]);
+            DB::table('customer_orders')->where('id', $orderId)->update(['version' => $version, 'updated_at' => now()]);
+            $this->audit($actor, $orderId, 'sales.revision_proposed', $version);
+
+            return ['revision_id' => $id, 'version' => $version, 'requires_agreement' => true, 'replayed' => false];
         }, 3);
     }
 
