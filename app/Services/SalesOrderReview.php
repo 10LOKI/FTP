@@ -1,0 +1,84 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\AuditEvent;
+use App\Models\CustomerProfile;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
+
+class SalesOrderReview
+{
+    private function authorize(User $actor): void
+    {
+        Gate::forUser($actor)->authorize('ORDER_REVIEW_MANAGE');
+        abort_if(CustomerProfile::query()->where('user_id', $actor->id)->exists(), 403);
+    }
+
+    /** @return array<string, mixed> */
+    public function claim(User $actor, int $orderId, int $expectedVersion): array
+    {
+        $this->authorize($actor);
+
+        return DB::transaction(function () use ($actor, $orderId, $expectedVersion): array {
+            $order = DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->first();
+            abort_unless($order !== null, 404);
+            $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
+            if ($review !== null) {
+                abort_unless((int) $review->claimed_by === $actor->id, 409, 'Cette demande est déjà prise en charge.');
+
+                return ['order_id' => (string) $orderId, 'version' => (int) $order->version, 'status' => $order->status];
+            }
+            abort_unless($order->status === 'SOUMISE' && (int) $order->version === $expectedVersion, 409, 'État ou version périmés.');
+            DB::table('sales_order_reviews')->insert(['order_id' => $orderId, 'claimed_by' => $actor->id, 'claimed_at' => now('UTC')]);
+            DB::table('customer_orders')->where('id', $orderId)->update(['status' => 'EN_VERIFICATION', 'version' => $expectedVersion + 1, 'updated_at' => now()]);
+            $this->audit($actor, $orderId, 'sales.order_claimed', $expectedVersion + 1);
+
+            return ['order_id' => (string) $orderId, 'version' => $expectedVersion + 1, 'status' => 'EN_VERIFICATION'];
+        }, 3);
+    }
+
+    /** @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    public function recordCall(User $actor, int $orderId, array $values): array
+    {
+        $this->authorize($actor);
+        $key = Str::lower($values['request_key']);
+        $payload = ['expected_version' => (int) $values['expected_version'], 'outcome' => $values['outcome'],
+            'happened_at' => $values['happened_at'], 'note' => $values['note'] ?? null];
+        $hash = hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
+
+        return DB::transaction(function () use ($actor, $orderId, $payload, $key, $hash): array {
+            $order = DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->first();
+            abort_unless($order !== null, 404);
+            $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
+            abort_unless($review !== null && (int) $review->claimed_by === $actor->id, 403);
+            $existing = DB::table('sales_order_calls')->where('order_id', $orderId)->where('request_key', $key)->first();
+            if ($existing !== null) {
+                abort_unless(hash_equals($existing->request_hash, $hash), 409, 'Clé déjà utilisée pour un autre appel.');
+
+                return ['call_id' => $existing->id, 'version' => (int) $existing->order_version, 'replayed' => true];
+            }
+            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === $payload['expected_version'], 409, 'État ou version périmés.');
+            $id = (string) Str::uuid();
+            $version = (int) $order->version + 1;
+            DB::table('sales_order_calls')->insert(['id' => $id, 'order_id' => $orderId, 'actor_id' => $actor->id,
+                'request_key' => $key, 'request_hash' => $hash, 'outcome' => $payload['outcome'],
+                'happened_at' => $payload['happened_at'], 'note' => $payload['note'], 'order_version' => $version, 'created_at' => now('UTC')]);
+            DB::table('customer_orders')->where('id', $orderId)->update(['version' => $version, 'updated_at' => now()]);
+            $this->audit($actor, $orderId, 'sales.call_recorded', $version);
+
+            return ['call_id' => $id, 'version' => $version, 'replayed' => false];
+        }, 3);
+    }
+
+    private function audit(User $actor, int $orderId, string $action, int $version): void
+    {
+        AuditEvent::create(['actor_id' => $actor->id, 'request_id' => (string) Str::uuid(), 'action' => $action,
+            'object_type' => 'customer_order', 'object_id' => (string) $orderId, 'result' => 'SUCCESS',
+            'changes' => ['after' => ['version' => $version]], 'occurred_at' => now('UTC')]);
+    }
+}

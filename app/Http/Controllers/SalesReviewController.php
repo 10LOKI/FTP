@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\CustomerOrderResource;
 use App\Models\CustomerProfile;
+use App\Services\SalesOrderReview;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -74,7 +76,35 @@ class SalesReviewController extends Controller
             ['id', 'customer_code', 'type', 'company_name']);
         $data['payment_mode'] = null;
         $data['payment_terms_status'] = 'contract_pending';
+        $data['can_manage'] = Gate::allows('ORDER_REVIEW_MANAGE');
+        $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
+        $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')
+            ->get(['id', 'actor_id', 'outcome', 'happened_at', 'note', 'order_version']);
 
         return response()->json(['data' => $data])->header('Cache-Control', 'private, no-store');
+    }
+
+    public function claim(Request $request, int $order, SalesOrderReview $reviews): JsonResponse
+    {
+        $this->authorizeReview($request);
+        $values = $request->validate(['expected_version' => ['required', 'integer', 'min:1', 'max:4294967293']]);
+
+        return response()->json(['data' => $reviews->claim($request->user(), $order, (int) $values['expected_version'])])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function recordCall(Request $request, int $order, SalesOrderReview $reviews): JsonResponse
+    {
+        $this->authorizeReview($request);
+        $values = $request->validate([
+            'request_key' => ['required', 'uuid'], 'expected_version' => ['required', 'integer', 'min:1', 'max:4294967293'],
+            'outcome' => ['required', Rule::in(['JOINED', 'UNREACHABLE', 'CALLBACK_REQUESTED', 'AGREEMENT', 'REFUSED'])],
+            'happened_at' => ['required', 'date', 'before_or_equal:now'], 'note' => ['nullable', 'string', 'max:2000'],
+            'actor_id' => ['prohibited'], 'status' => ['prohibited'], 'lines' => ['prohibited'],
+        ]);
+        $values['happened_at'] = CarbonImmutable::parse($values['happened_at'])->utc()->format('Y-m-d H:i:s');
+
+        return response()->json(['data' => $reviews->recordCall($request->user(), $order, $values)])
+            ->header('Cache-Control', 'private, no-store');
     }
 }
