@@ -7,6 +7,8 @@ use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
 use App\Http\Controllers\DeliveryPreparationController;
 use App\Http\Controllers\EmployeeSessionController;
+use App\Http\Controllers\InvoiceController;
+use App\Http\Controllers\InvoicePreviewController;
 use App\Http\Controllers\NotificationDeliveryController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductReferenceController;
@@ -125,4 +127,17 @@ Route::middleware(['auth', EnsureCustomerApproved::class])->group(function (): v
     Route::get('/api/v1/notification-deliveries', [NotificationDeliveryController::class, 'index'])->name('notification-deliveries.index');
     Route::post('/api/v1/notification-deliveries/{kind}/{delivery}/retry', [NotificationDeliveryController::class, 'retry'])
         ->whereUuid('delivery')->middleware('throttle:30,1')->name('notification-deliveries.retry');
+});
+
+Route::middleware(['auth', EnsureCustomerApproved::class, 'throttle:customer-commerce'])->group(function (): void {
+    Route::get('/gestion/facturation', [InvoicePreviewController::class, 'page'])->name('invoice-preview.page');
+    Route::get('/api/v1/billing/deliveries', [InvoicePreviewController::class, 'index'])->name('invoice-preview.index');
+    Route::get('/api/v1/billing/deliveries/{batch}', [InvoicePreviewController::class, 'source'])->whereUuid('batch')->name('invoice-preview.delivery');
+    Route::post('/api/v1/billing/preview', [InvoicePreviewController::class, 'preview'])->name('invoice-preview.preview');
+});
+
+Route::middleware(['auth', EnsureCustomerApproved::class, 'throttle:customer-commerce'])->group(function (): void {
+    Route::post('/api/v1/billing/invoices', [InvoiceController::class, 'store'])->name('invoices.store');
+    Route::get('/api/v1/invoices/{invoice}', [InvoiceController::class, 'show'])->whereUuid('invoice')->name('invoices.show');
+    Route::get('/api/v1/invoices/{invoice}/document', [InvoiceController::class, 'document'])->whereUuid('invoice')->name('invoices.document');
 });
