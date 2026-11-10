@@ -105,13 +105,16 @@ class SalesReviewController extends Controller
     public function proposeRevision(Request $request, int $order, SalesOrderReview $reviews): JsonResponse
     {
         $this->authorizeReview($request);
-        $kind = $request->validate(['kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address'])]])['kind'];
+        $kind = $request->validate(['kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address', 'lines'])]])['kind'];
         $rules = [
-            'kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address'])],
+            'kind' => ['required', Rule::in(['contact', 'delivery_address', 'billing_address', 'lines'])],
             'request_key' => ['required', 'uuid'], 'expected_version' => ['required', 'integer', 'min:1', 'max:4294967293'],
             'reason' => ['required', 'string', 'max:1000'],
         ];
-        if ($kind === 'contact') {
+        if ($kind === 'lines') {
+            $rules += ['changes' => ['required', 'array:lines'], 'pricing_token' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/']]
+                + $this->lineRules('changes.lines');
+        } elseif ($kind === 'contact') {
             $rules += ['changes' => ['required', 'array:name,email,phone'],
                 'changes.name' => ['required', 'string', 'max:160'], 'changes.email' => ['required', 'email', 'max:254'],
                 'changes.phone' => ['required', 'string', 'max:40']];
@@ -138,5 +141,24 @@ class SalesReviewController extends Controller
 
         return response()->json(['data' => $reviews->recordCall($request->user(), $order, $values)])
             ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function previewLines(Request $request, int $order, SalesOrderReview $reviews): JsonResponse
+    {
+        $this->authorizeReview($request);
+        $values = $request->validate($this->lineRules('lines') + ['expected_version' => ['required', 'integer', 'min:1', 'max:4294967293']]);
+
+        return response()->json(['data' => $reviews->previewLines($request->user(), $order, $values['lines'], (int) $values['expected_version'])])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    /** @return array<string, list<string>> */
+    private function lineRules(string $prefix): array
+    {
+        return [$prefix => ['required', 'array', 'list', 'min:1', 'max:200'],
+            $prefix.'.*' => ['required', 'array:product_id,quantity,units_per_package'],
+            $prefix.'.*.product_id' => ['required', 'integer', 'min:1'],
+            $prefix.'.*.quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            $prefix.'.*.units_per_package' => ['required', 'integer', 'min:1', 'max:2147483647']];
     }
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-function SalesReview({ api }) {
+function SalesReview({ api, catalogue }) {
     const [orders, setOrders] = useState(null);
     const [detail, setDetail] = useState(null);
     const [error, setError] = useState('');
@@ -72,6 +72,8 @@ function SalesReview({ api }) {
             <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
+            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <SalesLinesEditor key={detail.id + '-' + detail.version}
+                detail={detail} api={api} catalogue={catalogue} disabled={busy || uncertain} save={values => mutate('revisions', values)} />}
             {detail.can_manage && detail.status === 'SOUMISE' && <button disabled={busy} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
             {detail.can_manage && detail.status === 'EN_VERIFICATION' && <form onSubmit={event => {
                 event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
@@ -108,5 +110,80 @@ function SalesReview({ api }) {
         </article>}
     </section>;
 }
+
+function SalesLinesEditor({ detail, api, catalogue, disabled, save }) {
+    const original = [...(detail.revisions ?? [])].reverse().find(item => item.kind === 'lines')?.after.lines ?? detail.lines;
+    const [lines, setLines] = useState(original.map(line => ({ product_id: String(line.product_id), quantity: line.quantity,
+        units_per_package: line.units_per_package, label: [line.sku, line.designation].filter(Boolean).join(' — ') })));
+    const [reference, setReference] = useState('');
+    const [products, setProducts] = useState([]);
+    const [preview, setPreview] = useState(null);
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [reason, setReason] = useState('');
+    async function request(url, values) {
+        const response = await fetch(url, { method: values ? 'POST' : 'GET', credentials: 'same-origin',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+            ...(values ? { body: JSON.stringify(values) } : {}) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(response.status === 422 ? Object.values(payload.errors ?? {}).flat().join(' ') || payload.message :
+            response.status === 409 ? 'La commande a changé. Rouvrez son détail.' : 'Opération refusée ou indisponible.');
+        return payload;
+    }
+    async function search() {
+        setLoading(true); setError('');
+        try { setProducts((await request(catalogue + '?' + new URLSearchParams({ reference }))).data); }
+        catch (failure) { setError(failure.message); }
+        finally { setLoading(false); }
+    }
+    function change(index, field, value) {
+        setPreview(null);
+        const selected = field === 'product_id' ? products.find(product => String(product.id) === value) : null;
+        setLines(current => current.map((line, position) => position === index ? { ...line, [field]: value,
+            ...(field === 'product_id' ? { units_per_package: 1, label: selected ? [selected.sku, selected.designation].filter(Boolean).join(' — ') : '' } : {}) } : line));
+    }
+    async function calculate(event) {
+        event.preventDefault(); setLoading(true); setError(''); setPreview(null);
+        const requested = lines.map(line => ({ product_id: Number(line.product_id), quantity: Number(line.quantity), units_per_package: Number(line.units_per_package) }));
+        try { setPreview({ ...(await request(api + '/' + detail.id + '/line-preview', { expected_version: detail.version, lines: requested })).data, requested }); }
+        catch (failure) { setError(failure.message); }
+        finally { setLoading(false); }
+    }
+    return <section aria-label="Proposition de produits et quantités" aria-busy={loading}>
+        <h3>Proposer des produits et quantités</h3>
+        <p>Les prix proviennent de la tarification réelle du client. Les substitutions et nouvelles conditions restent à soumettre à son accord.</p>
+        <fieldset disabled={disabled || loading}>
+            <legend>Rechercher une pièce</legend>
+            <label>Référence<input value={reference} onChange={event => setReference(event.target.value)} maxLength="120" /></label>
+            <button type="button" onClick={search}>Rechercher dans le catalogue</button>
+            <p>{products.length} résultat(s) chargés. Affinez la référence si nécessaire.</p>
+        </fieldset>
+        <form onSubmit={calculate}><fieldset disabled={disabled || loading}><legend>Lignes proposées</legend>
+            {lines.map((line, index) => <fieldset key={index}><legend>Pièce {index + 1}</legend>
+                <label>Produit<select value={line.product_id} required onChange={event => change(index, 'product_id', event.target.value)}>
+                    <option value="">Choisir une pièce</option>
+                    {line.product_id && !products.some(product => String(product.id) === line.product_id) && <option value={line.product_id}>{line.label || 'Pièce sélectionnée'}</option>}
+                    {products.map(product => <option key={product.id} value={product.id}>{product.sku} — {product.designation}</option>)}
+                </select></label>
+                <label>Nombre de conditionnements<input type="number" min="1" max="1000000" step="1" required value={line.quantity} onChange={event => change(index, 'quantity', event.target.value)} /></label>
+                <label>Unités par conditionnement<input type="number" min="1" max="2147483647" step="1" required value={line.units_per_package} onChange={event => change(index, 'units_per_package', event.target.value)} /></label>
+                <button type="button" onClick={() => { setPreview(null); setLines(current => current.filter((_, position) => position !== index)); }}>Retirer de la proposition</button>
+            </fieldset>)}
+            <button type="button" disabled={lines.length >= 200} onClick={() => { setPreview(null); setLines(current => [...current, { product_id: '', quantity: 1, units_per_package: 1, label: '' }]); }}>Ajouter une pièce</button>
+            <button disabled={lines.length === 0}>Recalculer les prix client</button>
+        </fieldset></form>
+        {error && <p role="alert">{error}</p>}
+        {preview && <form onSubmit={event => {
+            event.preventDefault(); save({ kind: 'lines', changes: { lines: preview.requested }, pricing_token: preview.pricing_token,
+                expected_version: preview.version, reason, request_key: crypto.randomUUID() });
+        }}><fieldset disabled={disabled || loading}><legend>Prévisualisation de la proposition</legend>
+            <ul>{preview.lines.map(line => <li key={line.product_id + '-' + line.units_per_package}>{line.sku} — {line.designation} : {line.quantity} × {line.units_per_package}, prix unitaire {line.unit_price} MAD TTC, total {line.line_subtotal}</li>)}</ul>
+            <p>Sous-total proposé : {preview.estimated_subtotal} MAD TTC. Frais à confirmer.</p>
+            <label>Motif<textarea required maxLength="1000" value={reason} onChange={event => setReason(event.target.value)} /></label>
+            <button>Enregistrer la proposition en attente d’accord</button>
+        </fieldset></form>}
+    </section>;
+}
 const root = document.getElementById('sales-review');
-if (root) createRoot(root).render(<SalesReview api={root.dataset.api} />);
+if (root) createRoot(root).render(<SalesReview api={root.dataset.api} catalogue={root.dataset.catalogue} />);

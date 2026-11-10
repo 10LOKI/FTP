@@ -32,6 +32,7 @@ Route::prefix('v1/sales/orders')->middleware(['auth:sanctum', EnsureCustomerAppr
     Route::post('/{order}/claim', [SalesReviewController::class, 'claim'])->whereNumber('order')->name('sales.review.claim');
     Route::post('/{order}/calls', [SalesReviewController::class, 'recordCall'])->whereNumber('order')->name('sales.review.calls');
     Route::post('/{order}/revisions', [SalesReviewController::class, 'proposeRevision'])->whereNumber('order')->name('sales.review.revisions');
+    Route::post('/{order}/line-preview', [SalesReviewController::class, 'previewLines'])->whereNumber('order')->name('sales.review.line-preview');
 });
 
 Route::prefix('v1/me/orders')->middleware(['throttle:customer-commerce', AuditCustomerOrderRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {

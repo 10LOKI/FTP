@@ -12,6 +12,26 @@ use Illuminate\Support\Str;
 
 class SalesOrderReview
 {
+    public function __construct(private readonly SalesLineProposal $lineProposals) {}
+
+    /** @param list<array{product_id: int|string, quantity: int|string, units_per_package: int|string}> $lines
+     * @return array<string, mixed>
+     */
+    public function previewLines(User $actor, int $orderId, array $lines, int $expectedVersion): array
+    {
+        $this->authorize($actor);
+
+        return DB::transaction(function () use ($actor, $orderId, $lines, $expectedVersion): array {
+            $order = DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->first();
+            abort_unless($order !== null, 404);
+            $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
+            abort_unless($review !== null && (int) $review->claimed_by === $actor->id, 403);
+            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === $expectedVersion, 409);
+
+            return $this->lineProposals->calculate((int) $order->user_id, $lines) + ['version' => (int) $order->version];
+        }, 3);
+    }
+
     private function authorize(User $actor): void
     {
         Gate::forUser($actor)->authorize('ORDER_REVIEW_MANAGE');
@@ -85,7 +105,11 @@ class SalesOrderReview
         $key = Str::lower($values['request_key']);
         $changes = $values['changes'];
         ksort($changes);
-        $hash = hash('sha256', json_encode([(int) $values['expected_version'], $values['kind'], $changes, $values['reason']], JSON_THROW_ON_ERROR));
+        $identity = [(int) $values['expected_version'], $values['kind'], $changes, $values['reason']];
+        if ($values['kind'] === 'lines') {
+            $identity[] = $values['pricing_token'];
+        }
+        $hash = hash('sha256', json_encode($identity, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($actor, $orderId, $values, $key, $changes, $hash): array {
             $order = DB::table('customer_orders')->where('id', $orderId)->lockForUpdate()->first();
@@ -100,8 +124,22 @@ class SalesOrderReview
             }
             abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
             $previous = DB::table('sales_order_revisions')->where('order_id', $orderId)->where('kind', $values['kind'])->orderByDesc('order_version')->first();
-            $fields = $values['kind'] === 'contact' ? ['name', 'email', 'phone'] : ['address', 'city', 'postal_code', 'country'];
-            $before = Arr::only(json_decode($previous?->after ?? $order->{$values['kind']}, true, 512, JSON_THROW_ON_ERROR), $fields);
+            if ($values['kind'] === 'lines') {
+                $before = $previous === null ? ['lines' => json_decode($order->lines, true, 512, JSON_THROW_ON_ERROR)]
+                    : json_decode($previous->after, true, 512, JSON_THROW_ON_ERROR);
+                $proposal = $this->lineProposals->calculate((int) $order->user_id, $changes['lines']);
+                abort_unless(hash_equals($proposal['pricing_token'], $values['pricing_token']), 409, 'Le tarif a changé. Prévisualisez à nouveau.');
+                $proposal['lines'] = array_map(function (array $line) use ($before): array {
+                    $old = collect($before['lines'])->first(fn (array $original): bool => (string) $original['product_id'] === $line['product_id']
+                        && (int) $original['units_per_package'] === $line['units_per_package']);
+
+                    return ['id' => $old['id'] ?? (string) Str::uuid()] + $line;
+                }, $proposal['lines']);
+                $changes = $proposal;
+            } else {
+                $fields = $values['kind'] === 'contact' ? ['name', 'email', 'phone'] : ['address', 'city', 'postal_code', 'country'];
+                $before = Arr::only(json_decode($previous?->after ?? $order->{$values['kind']}, true, 512, JSON_THROW_ON_ERROR), $fields);
+            }
             $id = (string) Str::uuid();
             $version = (int) $order->version + 1;
             DB::table('sales_order_revisions')->insert(['id' => $id, 'order_id' => $orderId, 'actor_id' => $actor->id,
