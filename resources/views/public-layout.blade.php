@@ -57,6 +57,7 @@
         @can('catalogue-view-sale-price') <a href="{{ route('customer.promotions') }}">Promotions</a> @endcan
         @can('PROMOTION_MANAGE') <a href="{{ route('promotions.manage') }}">Gérer les promotions</a> @endcan
         @can('STOCK_VIEW') <a href="{{ route('stock.page') }}">Stocks et dépôts</a> @endcan
+        @can('ORDER_REVIEW') <a href="{{ route('sales.review.page') }}">Revue commerciale</a> @endcan
         @if (auth()->check() && auth()->user()->canAny(['AUDIT_READ', 'AUDIT_EXPORT']))
             <a href="{{ route('audit.page') }}">Journal et notifications</a>
         @endif
