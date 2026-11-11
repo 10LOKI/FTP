@@ -65,7 +65,7 @@ class CustomerFinanceConcurrencyTest extends TestCase
         DB::table('customer_orders')->where('id', $order->id)->update(['commercial_snapshot' => json_encode($snapshot)]);
         $state = DB::transaction(fn () => $service->state($customer->user_id));
         $allocation = [['receivable_id' => $state['receivables'][0]['id'], 'amount' => '50.00']];
-        $input = ['request_key' => (string) Str::uuid(), 'amount' => '50.00', 'mode' => 'cash', 'allocations' => $allocation];
+        $input = ['request_key' => (string) Str::uuid(), 'amount' => '50.00', 'mode' => 'cash', 'payment_date' => today()->toDateString(), 'allocations' => $allocation];
         $actions = ['payment', 'payment'];
         $inputs = [$input, [...$input, 'request_key' => $sameKey ? $input['request_key'] : (string) Str::uuid()]];
         if ($kind === 'credit') {

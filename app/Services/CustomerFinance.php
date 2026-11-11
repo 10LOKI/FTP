@@ -130,6 +130,12 @@ class CustomerFinance
                 $balances[$key] = bcadd($balances[$key] ?? '0.00', $allocation['amount'], 2);
             }
         }
+        $invoices = DB::table('billing_quantity_allocations')->join('customer_invoices', 'customer_invoices.id', '=', 'billing_quantity_allocations.source_id')
+            ->where('billing_quantity_allocations.kind', 'invoice')->where('customer_invoices.customer_id', $customerId)
+            ->orderBy('customer_invoices.issued_at')->orderBy('customer_invoices.id')->lockForUpdate()
+            ->get(['billing_quantity_allocations.delivery_line_id', 'billing_quantity_allocations.quantity',
+                'customer_invoices.id', 'customer_invoices.number', 'customer_invoices.issued_at'])
+            ->groupBy('delivery_line_id');
         $debt = '0.00';
         $overdue = '0.00';
         $receivables = [];
@@ -142,7 +148,9 @@ class CustomerFinance
             }
             $receivables[] = ['id' => $row->id, 'delivery_line_id' => $row->delivery_line_id, 'source_number' => $row->source_number,
                 'amount' => bcadd((string) $row->amount, '0', 2), 'balance' => $balance, 'due_date' => $row->due_date, 'due_origin' => $row->due_origin,
-                'mode' => $row->mode, 'status' => bccomp($balance, '0', 2) === 0 ? 'paid' : ($late ? 'overdue' : (bccomp($balance, $row->amount, 2) < 0 ? 'partially_paid' : 'unpaid'))];
+                'mode' => $row->mode, 'invoices' => $invoices->get($row->delivery_line_id, collect())->map(fn (object $invoice): array => [
+                    'id' => $invoice->id, 'number' => $invoice->number, 'issued_at' => $invoice->issued_at, 'quantity' => (int) $invoice->quantity,
+                ])->values()->all(), 'status' => bccomp($balance, '0', 2) === 0 ? 'paid' : ($late ? 'overdue' : (bccomp($balance, $row->amount, 2) < 0 ? 'partially_paid' : 'unpaid'))];
         }
         $credit = '0.00';
         $refunds = '0.00';
@@ -223,6 +231,8 @@ class CustomerFinance
                     'version' => $state['version'] + 1, 'mode' => $input['mode'], 'label' => $input['label'],
                     'reason' => $input['reason'], 'recorded_by' => $actor->id, 'created_at' => now('UTC')]);
             } elseif ($action === 'payment') {
+                abort_unless($this->validDate($input['payment_date'] ?? null)
+                    && $input['payment_date'] <= today()->toDateString(), 422, 'La date réelle du règlement est requise et ne peut être future.');
                 abort_unless(CustomerProfile::where('user_id', $customerId)->where('approval', 'APPROUVE')->exists(), 409, 'Le compte doit être approuvé.');
                 abort_unless($state['complete'], 409, 'Des départs attendent leurs conditions historiques.');
                 abort_unless($state['terms'] !== null && $state['terms']['mode'] === $input['mode'], 409, 'Le mode actif du client ne correspond pas.');

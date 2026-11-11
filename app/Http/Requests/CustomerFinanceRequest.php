@@ -29,7 +29,8 @@ class CustomerFinanceRequest extends FormRequest
         $specific = match ($this->route('action')) {
             'terms' => ['version' => ['required', 'integer', 'min:1'], 'mode' => ['required', Rule::in(CustomerFinance::MODES)],
                 'label' => ['required', 'string', 'max:255', 'regex:/\S/u'], 'reason' => $reason],
-            'payment' => ['amount' => $money, 'mode' => ['required', Rule::in(CustomerFinance::MODES)],
+            'payment' => ['amount' => $money, 'payment_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
+                'note' => ['nullable', 'string', 'max:2000'], 'mode' => ['required', Rule::in(CustomerFinance::MODES)],
                 'reference' => ['nullable', 'string', 'max:255'], 'maturity_date' => ['nullable', 'date_format:Y-m-d'], ...$allocations],
             'collect' => ['payment_id' => ['required', 'uuid'], 'reference' => ['required', 'string', 'max:255', 'regex:/\S/u']],
             'reverse' => ['payment_id' => ['required', 'uuid'], 'reason' => $reason],

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
+use App\Models\Product;
 use App\Models\User;
 use App\Services\AuditWriter;
 use App\Services\CustomerFinance;
@@ -61,7 +63,7 @@ class CustomerFinanceTest extends TestCase
 
     private function payment(array $debt, string $amount = '20.00', string $mode = 'cash'): array
     {
-        return ['request_key' => (string) Str::uuid(), 'amount' => $amount, 'mode' => $mode,
+        return ['request_key' => (string) Str::uuid(), 'amount' => $amount, 'mode' => $mode, 'payment_date' => today()->toDateString(),
             'allocations' => [['receivable_id' => $debt['receivable_id'], 'amount' => $amount]]];
     }
 
@@ -149,6 +151,9 @@ class CustomerFinanceTest extends TestCase
         $debt = $this->debt('2026-11-10');
         $this->postJson($this->url('payment'), $this->payment($debt, '50.00'))->assertCreated();
         $state = $this->getJson($this->url())->assertOk()->assertJsonPath('data.blocked', true)->assertJsonPath('data.debt', '0.00')->json('data');
+        $order = $this->orderInput();
+        $this->postJson('/api/v1/me/orders', $order)->assertConflict();
+        $this->actingAs($this->actor);
         $input = ['request_key' => (string) Str::uuid(), 'version' => $state['version'], 'reason' => 'Régularisation vérifiée'];
         $this->postJson($this->url('unblock'), $input)->assertForbidden();
         $this->grant($this->actor, ['ROLE_MANAGE', 'USER_ASSIGN_ROLE']);
@@ -156,6 +161,8 @@ class CustomerFinanceTest extends TestCase
         DB::table('roles')->where('id', $role->id)->update(['is_protected' => true]);
         $this->postJson($this->url('unblock'), $input)->assertCreated();
         $this->getJson($this->url())->assertOk()->assertJsonPath('data.blocked', false);
+        $this->actingAs($this->customer->user);
+        $this->postJson('/api/v1/me/orders', $order)->assertCreated();
     }
 
     public function test_reminders_are_internal_once_and_scheduler_latches_overdue_blocks(): void
@@ -338,5 +345,114 @@ class CustomerFinanceTest extends TestCase
         }
         $this->assertDatabaseCount('customer_receivables', 0);
         $this->assertDatabaseCount('customer_credit_rights', 0);
+    }
+
+    private function orderInput(): array
+    {
+        $this->actingAs($this->customer->user);
+        $product = Product::factory()->create(['publication' => 'published', 'sale_price' => '12.50']);
+        $cart = $this->getJson('/api/v1/me/cart')->assertOk()->json('data');
+        $cart = $this->putJson('/api/v1/me/cart/products/'.$product->id,
+            ['expected_version' => $cart['version'], 'quantity' => 2, 'units_per_package' => 1])->assertOk()->json('data');
+
+        return ['idempotency_key' => (string) Str::uuid(), 'expected_version' => $cart['version'], 'pricing_token' => $cart['pricing_token'],
+            'contact' => ['name' => 'Client de test', 'email' => 'client@example.test', 'phone' => '0612345678'],
+            'delivery_address' => ['address' => 'Adresse livraison', 'city' => 'Casablanca', 'country' => 'Maroc'],
+            'billing_address' => ['address' => 'Adresse facture', 'city' => 'Casablanca', 'country' => 'Maroc']];
+    }
+
+    public function test_new_orders_are_refused_when_debt_becomes_overdue_but_replay_and_history_remain_available(): void
+    {
+        $this->debt('2026-11-12');
+        $input = $this->orderInput();
+        $id = $this->postJson('/api/v1/me/orders', $input)->assertCreated()->json('data.id');
+        $next = $this->orderInput();
+        $beforeCart = $this->getJson('/api/v1/me/cart')->assertOk()->json('data');
+        $beforeOrders = DB::table('customer_orders')->count();
+        $this->travel(2)->days();
+        $this->postJson('/api/v1/me/orders', $next)->assertConflict();
+        $this->assertSame($beforeOrders, DB::table('customer_orders')->count());
+        $this->getJson('/api/v1/me/cart')->assertOk()->assertJsonPath('data.version', $beforeCart['version']);
+        $this->assertDatabaseCount('cart_lines', 1);
+        $this->postJson('/api/v1/me/orders', $input)->assertOk()->assertJsonPath('data.id', $id)->assertHeader('Idempotency-Replayed', 'true');
+        $this->getJson('/api/v1/me/orders/'.$id)->assertOk();
+        $this->getJson('/api/v1/me/finance')->assertOk()->assertJsonPath('data.blocked', true);
+        $this->assertSame($beforeOrders, DB::table('customer_orders')->count());
+    }
+
+    public function test_order_submission_retains_existing_behavior_while_payment_policy_is_disabled(): void
+    {
+        $this->debt('2026-11-10');
+        config(['receivables.enabled' => false]);
+        $input = $this->orderInput();
+        $this->postJson('/api/v1/me/orders', $input)->assertCreated();
+        $this->assertDatabaseHas('customer_finance_accounts', ['customer_id' => $this->customer->user_id, 'blocked' => true]);
+    }
+
+    public function test_actual_payment_date_and_note_are_historical_private_and_part_of_replay_identity(): void
+    {
+        $debt = $this->debt();
+        $input = [...$this->payment($debt), 'payment_date' => '2026-11-09', 'note' => 'PRIVATE-PAYMENT-NOTE', 'reference' => 'RECEIPT-TEST'];
+        $id = $this->postJson($this->url('payment'), $input)->assertCreated()->json('data.id');
+        $this->postJson($this->url('payment'), $input)->assertOk()->assertJsonPath('data.id', $id);
+        $this->postJson($this->url('payment'), [...$input, 'payment_date' => '2026-11-10'])->assertConflict();
+        $this->postJson($this->url('payment'), [...$input, 'note' => 'Changed note'])->assertConflict();
+        $row = DB::table('customer_finance_operations')->where('id', $id)->firstOrFail();
+        $payload = json_decode($row->payload, true);
+        $this->assertSame('2026-11-09', $payload['payment_date']);
+        $this->assertSame('PRIVATE-PAYMENT-NOTE', $payload['note']);
+        $this->assertStringStartsWith('2026-11-11', $row->created_at);
+        $this->getJson($this->url())->assertOk()->assertSee('PRIVATE-PAYMENT-NOTE');
+        $this->actingAs($this->customer->user);
+        $this->getJson('/api/v1/me/finance')->assertOk()->assertDontSee('PRIVATE-PAYMENT-NOTE')->assertDontSee('RECEIPT-TEST');
+        $this->assertStringNotContainsString('PRIVATE-PAYMENT-NOTE', AuditEvent::all()->toJson());
+    }
+
+    public function test_payment_dates_and_notes_are_validated_without_recording_invalid_entries(): void
+    {
+        $debt = $this->debt();
+        $input = $this->payment($debt);
+        foreach (['2026-02-31', '2026-11-12', 'not-a-date', null] as $date) {
+            $this->postJson($this->url('payment'), [...$input, 'payment_date' => $date])->assertUnprocessable()->assertJsonValidationErrors('payment_date');
+        }
+        unset($input['payment_date']);
+        $this->postJson($this->url('payment'), $input)->assertUnprocessable()->assertJsonValidationErrors('payment_date');
+        $this->postJson($this->url('payment'), [...$this->payment($debt), 'note' => str_repeat('x', 2001)])->assertUnprocessable()->assertJsonValidationErrors('note');
+        $this->assertSame(0, DB::table('customer_finance_operations')->where('action', 'payment')->count());
+    }
+
+    public function test_delivery_balances_show_only_linked_customer_invoices_and_protect_downloads(): void
+    {
+        $debt = $this->debt();
+        $this->enableTestBilling();
+        $this->grant($this->actor, ['INVOICE_ISSUE']);
+        $ids = [];
+        foreach ([2, 3] as $quantity) {
+            $input = $this->invoiceInput($this->customer, [$this->selection($debt, $quantity)]);
+            $ids[] = $this->postJson('/api/v1/billing/invoices', $input)->assertCreated()->json('data.id');
+            $this->travel(1)->seconds();
+        }
+        $state = $this->getJson($this->url())->assertOk()->assertJsonPath('data.debt', '50.00')->assertJsonCount(2, 'data.receivables.0.invoices')
+            ->assertJsonPath('data.receivables.0.invoices.0.quantity', 2)->assertJsonPath('data.receivables.0.invoices.1.quantity', 3)
+            ->assertJsonPath('data.receivables.0.invoices.0.document_url', null)->json('data');
+        $this->assertSame($ids, array_column($state['receivables'][0]['invoices'], 'id'));
+        $this->get('/api/v1/invoices/'.$ids[0].'/document')->assertForbidden();
+        $this->grant($this->actor, ['INVOICE_READ']);
+        $this->getJson($this->url())->assertOk()->assertJsonPath('data.receivables.0.invoices.0.document_url', route('invoices.document', $ids[0]));
+        $this->get('/api/v1/invoices/'.$ids[0].'/document')->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $owner = $this->customer;
+        $this->customer = CustomerProfile::factory()->create(['approval' => 'APPROUVE']);
+        $foreign = $this->debt();
+        $input = $this->invoiceInput($this->customer, [$this->selection($foreign, 1)]);
+        $foreignInvoice = $this->postJson('/api/v1/billing/invoices', $input)->assertCreated()->json('data');
+        $this->customer = $owner;
+        DB::table('billing_quantity_allocations')->insert(['id' => (string) Str::uuid(), 'delivery_line_id' => $debt['line_id'],
+            'kind' => 'invoice', 'source_id' => $foreignInvoice['id'], 'quantity' => 1, 'created_at' => now()]);
+        $this->getJson($this->url())->assertOk()->assertJsonCount(2, 'data.receivables.0.invoices')->assertDontSee($foreignInvoice['number']);
+        $this->actingAs($owner->user);
+        $this->getJson('/api/v1/me/finance')->assertOk()->assertJsonCount(2, 'data.receivables.0.invoices')
+            ->assertJsonPath('data.receivables.0.invoices.0.document_url', route('invoices.document', $ids[0]));
+        $this->get('/api/v1/invoices/'.$ids[0].'/document')->assertOk();
+        $this->getJson('/api/v1/invoices/'.$foreignInvoice['id'])->assertNotFound();
     }
 }

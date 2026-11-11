@@ -66,6 +66,15 @@ class CustomerFinanceController extends Controller
                 ->where('customer_receivables.customer_id', $customer)->pluck('customer_finance_reminders.receivable_id')->all();
         }
 
+        $canReadDocuments = $own || $request->user()->can('INVOICE_READ');
+        foreach ($state['receivables'] as &$receivable) {
+            foreach ($receivable['invoices'] as &$invoice) {
+                $invoice['document_url'] = $canReadDocuments ? route('invoices.document', $invoice['id']) : null;
+            }
+            unset($invoice);
+        }
+        unset($receivable);
+
         return response()->json(['data' => $state])->header('Cache-Control', 'private, no-store');
     }
 

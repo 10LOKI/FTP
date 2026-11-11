@@ -108,25 +108,27 @@ function Finance() {
             <p>Ventes : {!state.enabled ? 'contrôle financier désactivé' : state.blocked ? 'bloquées — régularisation et déblocage administrateur requis' : state.overdue !== '0.00' ? 'bloquées pour impayé' : !state.complete || !state.terms ? 'conditions requises' : 'contrôle financier satisfait'}.</p>
             <p>Mode actif : {modes[state.terms?.mode] || 'à définir'}{state.terms && ` · ${state.terms.label}`}. Les changements futurs conservent les échéances et les documents historiques.</p>
             <h2>Créances par livraison</h2>
-            <div className="grid">{state.receivables.map(row => <article key={row.id}><h3>{row.source_number}</h3><p>Montant : {row.amount} MAD TTC · Restant : {row.balance} MAD TTC</p><p>Échéance : {row.due_date} · {modes[row.mode]} · {({ paid: 'Payé', unpaid: 'Non payé', overdue: 'Échu', partially_paid: 'Partiellement payé' })[row.status]}</p>{state.reminders?.includes(row.id) && row.balance !== '0.00' && <p>Rappel interne : échéance à suivre</p>}</article>)}</div>
+            <div className="grid">{state.receivables.map(row => <article key={row.id}><h3>{row.source_number}</h3><p>Montant : {row.amount} MAD TTC · Restant : {row.balance} MAD TTC</p><p>Échéance : {row.due_date} · {modes[row.mode]} · {({ paid: 'Payé', unpaid: 'Non payé', overdue: 'Échu', partially_paid: 'Partiellement payé' })[row.status]}</p>{row.invoices.length === 0 ? <p>Aucune facture liée.</p> : <ul aria-label="Factures liées">{row.invoices.map(invoice => <li key={invoice.id}>{invoice.document_url ? <a href={invoice.document_url}>Facture {invoice.number} — PDF</a> : <span>Facture {invoice.number}</span>} · Émise le {invoice.issued_at} · {invoice.quantity} pièce(s) de cette livraison</li>)}</ul>}{state.reminders?.includes(row.id) && row.balance !== '0.00' && <p>Rappel interne : échéance à suivre</p>}</article>)}</div>
             {!own && availableActions.length > 0 && <form ref={form} onSubmit={submit}>
                 <fieldset disabled={busy || uncertain || !state.enabled}>
                     <legend>Nouvelle opération</legend>
                     <label>Action<select value={action} onChange={e => setAction(e.target.value)}>{availableActions.map(key => <option value={key} key={key}>{actions[key]}</option>)}</select></label>
                     {['terms', 'payment'].includes(action) && <label>Mode de paiement<select required name="mode" value={mode} onChange={e => setMode(e.target.value)}><option value="">Choisir explicitement</option>{Object.entries(modes).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>}
+                    {action === 'payment' && <label>Date réelle du règlement<input type="date" name="payment_date" required/></label>}
+                    {action === 'payment' && <label>Note interne<textarea name="note" maxLength={2000}/></label>}
                     {action === 'terms' && <label>Libellé des conditions futures<input name="label" required maxLength={255}/></label>}
                     {['payment', 'credit_apply', 'refund'].includes(action) && <label>Montant MAD TTC<input name="amount" required inputMode="decimal" pattern="[0-9]+\.[0-9]{2}" placeholder="0.00"/></label>}
                     {['payment', 'credit_apply'].includes(action) && <label>Affecter à la créance<select name="receivable_id" required><option value="">Choisir une créance</option>{due.map(row => <option key={row.id} value={row.id}>{row.source_number} · {row.balance} MAD · {row.id.slice(0, 8)}</option>)}</select></label>}
                     {['collect', 'reverse'].includes(action) && <label>Règlement<select name="payment_id" required><option value="">Choisir un règlement</option>{eligiblePayments.map(row => <option key={row.id} value={row.id}>{row.amount} MAD · {modes[row.mode]} · {row.created_at} · {row.reference}</option>)}</select></label>}
                     {['credit_apply', 'refund'].includes(action) && <label>Droit disponible<select name="credit_id" required><option value="">Choisir un crédit</option>{state.credits.filter(row => row.available !== '0.00').map(row => <option key={row.id} value={row.id}>{row.id.slice(0, 8)} · {row.available} MAD</option>)}</select></label>}
-                    {((action === 'payment' && mode !== 'cash') || ['collect', 'refund'].includes(action)) && <label>Référence de l’opération réalisée<input name="reference" required maxLength={255}/></label>}
+                    {(action === 'payment' || ['collect', 'refund'].includes(action)) && <label>Référence de l’opération réalisée<input name="reference" required={action !== 'payment' || mode !== 'cash'} maxLength={255}/></label>}
                     {action === 'payment' && mode !== 'cash' && <label>Échéance du chèque<input type="date" name="maturity_date" required/></label>}
                     {['reverse', 'terms', 'credit_apply', 'refund', 'unblock'].includes(action) && <label>Motif<textarea name="reason" required maxLength={2000}/></label>}
                     <label><input type="checkbox" required/> Je confirme le client, le montant, les références et l’affectation de cette opération.</label>
                     <button>{busy ? 'Enregistrement…' : actions[action]}</button>
                 </fieldset>
             </form>}
-            {!own && <><h2>Historique financier</h2><div className="grid">{state.operations.map(op => <article key={op.id}><h3>{actions[op.action]}</h3><p>{op.created_at} · {op.amount && `${op.amount} MAD TTC`}</p>{op.reference && <p>Référence : {op.reference}</p>}{op.reason && <p>Motif : {op.reason}</p>}</article>)}</div></>}
+            {!own && <><h2>Historique financier</h2><div className="grid">{state.operations.map(op => <article key={op.id}><h3>{actions[op.action]}</h3><p>{op.created_at} · {op.amount && `${op.amount} MAD TTC`}</p>{op.payment_date && <p>Date réelle du règlement : {op.payment_date}</p>}{op.reference && <p>Référence : {op.reference}</p>}{op.note && <p>Note interne : {op.note}</p>}{op.reason && <p>Motif : {op.reason}</p>}</article>)}</div></>}
         </>}
     </>;
 }

@@ -864,7 +864,7 @@ Actions et champs additionnels :
 | Action | Droit | Champs |
 | --- | --- | --- |
 | `terms` | `CUSTOMER_TERMS_MANAGE` | `version`, `mode`, `label`, `reason` |
-| `payment` | `PAYMENT_RECORD` | `amount`, `mode`, `allocations`; pour un chèque : `reference`, `maturity_date` |
+| `payment` | `PAYMENT_RECORD` | `amount`, `mode`, `payment_date`, `allocations`, `note` facultative; pour un chèque : `reference`, `maturity_date` |
 | `collect` | `PAYMENT_RECORD` | `payment_id`, `reference` réelle d’encaissement |
 | `reverse` | `PAYMENT_CORRECT` | `payment_id`, `reason` |
 | `credit_apply` | `PAYMENT_RECORD` | `credit_id`, `amount`, `allocations`, `reason` |
@@ -963,3 +963,44 @@ build React, Pint et contrôle du diff réussis.
 Revalidation MySQL de cette revue : **22 tests / 257 assertions réussis**, dont
 les quatre scénarios concurrents de règlement, replay, crédit/remboursement et
 encaissement/correction.
+
+
+Compléments tirés du cahier V3 (pages 19 à 21, PAY-04/PAY-05), sans activation
+des décisions D04/D23 :
+
+- Le contrôle financier s’applique également à la création d’une nouvelle demande
+  client. Un refus préserve le panier. Le replay d’une demande déjà enregistrée
+  conserve son résultat et ne crée pas une nouvelle vente ; les droits et l’état
+  du compte restent vérifiés. L’historique et les documents propres restent
+  accessibles pour régularisation. Cette vérification suit le même commutateur
+  `receivables.enabled` que la confirmation et reste inactive dans la configuration
+  livrée.
+- Chaque créance expose `invoices` : numéro, date d’émission, identifiant et
+  quantité affectée à cette ligne de livraison. Plusieurs factures partielles
+  peuvent être affichées sans ajouter de dette. Les métadonnées sont limitées au
+  même client ; les liens PDF n’apparaissent que pour le propriétaire ou avec
+  `INVOICE_READ`. Le téléchargement recontrôle toujours les droits.
+- La saisie d’un règlement exige désormais `payment_date` au format `YYYY-MM-DD`,
+  date réelle passée ou courante, distincte de l’horodatage serveur d’enregistrement
+  et de l’échéance du chèque. `note` est facultative (2 000 caractères maximum) ;
+  la référence reste facultative pour les espèces. La date et la note font partie
+  du contenu protégé par la clé de replay. Elles sont conservées dans l’opération
+  historique sans modifier les anciennes écritures. Les notes et références
+  internes restent absentes de l’API client et de l’audit général.
+
+Le nombre de jours, leur origine, le calendrier et l’anticipation des rappels
+restent à définir par l’entreprise. L’exemple de 60 jours du cahier ne constitue
+pas une valeur approuvée.
+
+Vérification des compléments : **729 tests / 5 027 assertions SQLite réussis,
+25 tests MySQL ignorés explicitement**. Build React, Pint et contrôle du diff
+réussis. Navigateur sur données jetables : facture partielle liée visible,
+règlement de 75 MAD avec date réelle du 10 novembre et note interne enregistré
+le 11 novembre ; dette passée de 627,50 à 552,50 MAD, sans nouvelle créance.
+Les tests couvrent aussi le refus d’une nouvelle commande échue sans perte du
+panier, le replay conservé, le blocage maintenu après paiement et la reprise après
+déblocage protégé. Aucun paramètre métier différé n’a été activé.
+Matrice MySQL isolée finale : **50 tests / 615 assertions réussis**, dont sept
+scénarios concurrents de commande et de finance. Les tests utilisant un worker
+Laravel distinct ont été lancés avec les variables de la base jetable également
+exportées dans l’environnement du processus, et pas seulement dans PHPUnit.
