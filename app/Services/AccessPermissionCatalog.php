@@ -24,6 +24,8 @@ class AccessPermissionCatalog
         'STOCK_TRANSFER' => 'Transférer le stock disponible entre dépôts',
         'STOCK_STRUCTURE_MANAGE' => 'Gérer les dépôts, emplacements et seuils',
         'ORDER_CONFIRM' => 'Confirmer une commande et réserver son stock',
+        'ORDER_REVIEW' => 'Consulter la file et le détail des demandes commerciales',
+        'ORDER_REVIEW_MANAGE' => 'Prendre en charge les demandes et consigner les appels',
         'RESERVATION_CANCEL' => 'Libérer les réservations d’une commande annulée',
         'DELIVERY_PREPARE' => 'Prendre et préparer un bon de livraison',
         'DELIVERY_TRANSFER' => 'Transférer un bon de livraison entre préparateurs',
