@@ -641,3 +641,188 @@ Le solde fournisseur reste inchangé à l'expédition. `POST /{return}/credit`, 
 Démonstration locale facultative, sans compte, permission attribuée ou stock inventé : `php artisan db:seed --class=WarehouseStockDemoSeeder --no-interaction` (local/testing uniquement). Deux dépôts `DEMO-A/B` et leurs emplacements sont créés de façon répétable. Effectuer ensuite les vraies réceptions avec un acteur autorisé et une pièce source.
 
 Vérification du 8 novembre2026, PHP8.4.27/Laravel13.39/MySQL8.4 : Pint et build passent ; image Docker finale reconstruite, suite SQLite complète **668 tests /3578 assertions**,12 sauts réservés à MySQL/pcntl ; tests FTP-24 sur MySQL jetable **22 tests /187 assertions**, incluant quatre courses réelles (rejeu, dernière unité, transferts concurrents et opposés). Commandes : `vendor/bin/pint --dirty --format agent`, `npm run build`, `DB_CONNECTION=sqlite DB_DATABASE=:memory: vendor/bin/phpunit` ; qualification MySQL avec configuration distincte retirant les seuls `server DB_*` forcés, clé de test éphémère et base jetable. Chrome : vraie session employé sur SQLite isolée, réception par clavier100→105 et journal+5, alerte à105, vue iPhone SE375×667 inspectée après corrections CSS/pattern. Ces preuves ne valent pas recette sur smartphone physique, douchette, ni intégration réelle de confirmation/départ BL.
+
+### FTP-87 — Sélection de BL et aperçu de facture
+
+La page `/gestion/facturation` sélectionne les BL d'un compte client (identifiant
+`customer_orders.user_id`). L'accès exige la permission effective `INVOICE_PREVIEW` ;
+un compte client est refusé même s'il possède cette permission. Le seeder
+`BillingPermissionSeeder` crée uniquement le code manquant, sans attribuer de rôle.
+Le responsable des habilitations doit l'ajouter aux rôles autorisés.
+
+Routes de session, réponses privées `no-store`, CSRF requis pour le POST :
+
+- `GET /api/v1/billing/deliveries?customer_id=123&page=1` : départs validés,
+  pagination de 20 BL ; chaque ligne expose les pièces livrées, déjà facturées,
+  retournées avant facture et restantes, son prix historique et un jeton de version.
+- `GET /api/v1/billing/deliveries/{uuid}` : projection filtrée du BL source,
+  accessible au personnel de facturation sans lui accorder de droit de préparation.
+- `POST /api/v1/billing/preview` : `{ "customer_id": 123, "lines": [
+  { "delivery_line_id": "UUID", "quantity": 2, "availability_token": "SHA256" }
+  ] }`. Entre 1 et 100 lignes distinctes ; quantités entières en **pièces**,
+  indépendamment du conditionnement. Prix/totaux fournis par le navigateur refusés.
+  Client mélangé/inconnu : 422 ; disponibilité, version ou prix historique
+  invalides : 409. Le client doit recharger sa sélection après un conflit.
+
+La source réelle est `delivery_batches` DISPATCHED avec auteur de départ enregistré
+par FTP-26, date et empreinte documentaire, reliée aux `delivery_batch_lines`.
+Les prix proviennent du snapshot `customer_orders.lines` (`unit_price` par pièce,
+`pricing.currency=MAD`, `pricing.tax_basis=TTC`), jamais des produits courants.
+Une ligne sans ce snapshot ne peut pas être prévisualisée. Aucun taux de TVA,
+frais, mode de paiement ou numéro de facture n'est déduit du TTC. Les snapshots
+actuels de soumission restent indicatifs ; le contrat du snapshot commercial
+accepté devra être raccordé avec FTP-22/23 avant l'émission FTP-88.
+
+Le contrat proposé `billing_quantity_allocations` représente les pièces déjà
+allouées à une facture (`invoice`) ou retirées par un retour **avant facturation**
+(`return_before_invoice`). Le net vaut livré − facturé − retourné avant facture.
+Chaque opération possède un `source_id` UUID unique par ligne/type : un replay
+ne doit pas ajouter une deuxième allocation. Un retour après facture ne doit pas
+être déduit une seconde fois ; il relève du crédit FTP-29. Les écritures
+FTP-88/29 doivent verrouiller le même `delivery_batches` avant de lire/allouer,
+plafonner les quantités et écrire dans leur transaction métier. L'aperçu verrouille
+les BL et les commandes dans un ordre déterministe, mais ne réserve aucune quantité.
+Un aperçu n'autorise jamais une émission sans nouvelle validation sous verrou.
+
+**Limite d'intégration FTP-87 :** le producteur de facture est maintenant fourni
+par FTP-88 ci-dessous ; le producteur réel de retour client reste à raccorder. Les déductions de facture sont produites par FTP-88 ; celles des retours restent
+vérifiées avec des allocations de test. Le raccordement FTP-29 et l'accord sur
+ce contrat restent à faire.
+Le parcours de départ partiel FTP-26 est testé avec son vrai service. Aucun mouvement
+de stock, dette, paiement, allocation ou document émis n'est créé par cet aperçu.
+Les projections excluent EUR, coûts d'achat, notes internes et secrets.
+
+Vérification locale du 10 novembre 2026 : 22 tests / 141 assertions SQLite
+(aperçu, départ et permissions), 15 tests / 125 assertions MySQL 8.4 isolé
+(aperçu et départ), Pint et build React réussis. Navigateur : session employé,
+chargement d'un BL de démonstration, sélection de 2 pièces à 125,50 et aperçu à
+251,00 MAD TTC vérifiés. La recette mobile/clavier complète et la revue humaine
+restent à faire. Un passage MySQL élargi à `EffectivePermissionsTest` a détecté
+l'échec préexistant de `test_multiple_roles_combine_permissions_without_duplicates_or_other_users_access`
+(comparaison d'un code de permission en minuscules avec collation insensible à la
+casse) ; ce défaut hors FTP-87 n'a pas été modifié. Les contrôles de vrais rôles,
+révocation et refus client propres à FTP-87 passent aussi sur MySQL.
+
+### FTP-88 — Émission atomique et PDF historique (activation désactivée)
+
+À la demande de Mehdi, `config/billing.php` conserve `issuance_enabled=false`.
+L'aperçu reste utilisable et explique que l'émission attend les règles approuvées.
+Aucun endpoint ne permet au navigateur d'activer cette configuration.
+Les valeurs vendeur, politique, préfixe et clé de séquence restent non renseignées.
+Le préfixe + compteur à six chiffres minimum est une capacité technique, pas une
+numérotation métier approuvée. La présentation `ttc_only` nécessite aussi une
+validation explicite ; aucun taux de TVA n'est créé ou supposé.
+
+Contrat **proposé**, à raccorder par le propriétaire FTP-22/23 :
+`customer_orders.commercial_snapshot.billing_v1` avec `status=confirmed`,
+`confirmed_by` (identifiant numérique), `confirmed_at`, `lines_sha256` calculé par
+`InvoiceIssuanceContext::linesHash()` sur les lignes persistées, `customer_id`
+(identifiant utilisateur), `currency=MAD`, `tax_basis=TTC`, `customer` et
+`payment_terms`. L'identité contient `name`, `address` et, si disponibles,
+`customer_code`, `ice`, `tax_identifier`, `rc`. Les conditions contiennent `mode`,
+`label` et éventuellement `due_days` / `due_date` historiques, sans nouveau calcul
+d'échéance. Aucun snapshot fourni par le navigateur n'est accepté. Les fixtures
+confirmées ne constituent pas une intégration avec le futur producteur commercial.
+
+- `POST /api/v1/billing/invoices` exige `INVOICE_PREVIEW` et `INVOICE_ISSUE`, les
+  champs de sélection de FTP-87, `request_key` UUID et `issuance_token` reçu dans
+  l'aperçu prêt. Nouveau document : 201 ; même auteur/clé/contenu : 200 avec
+  `replayed=true`. Un autre contenu/auteur pour cette clé est refusé (409).
+- `GET /api/v1/invoices/{uuid}` et `GET /api/v1/invoices/{uuid}/document` exigent
+  `INVOICE_READ` pour un employé. Un client approuvé n'accède qu'à ses propres
+  documents ; un autre client reçoit 404. Cache privé sans stockage, contrôle
+  d'intégrité SHA-256 et téléchargement PDF privé. Le seeder ajoute les codes
+  manquants sans attribuer de rôle.
+- L'interface demande la vérification du client/des quantités/du total avant
+  l'émission. Une réponse réseau incertaine conserve la demande et sa clé, bloque
+  une nouvelle sélection et permet la reprise de la même émission.
+
+La transaction verrouille la séquence, puis les BL, commandes, lignes et
+allocations courants. Elle revérifie les prix/quantités et le jeton qui lie la
+sélection aux identités, conditions et paramètres approuvés. Numéro, snapshot
+filtré, octets PDF, empreinte, allocations et événement `invoice.issued` sont
+commités ensemble. Échec PDF/audit : rollback complet, compteur inclus. Les
+reprises simultanées partagent un seul document. Des triggers interdisent update
+et delete des factures émises et des allocations ; la future correction FTP-29
+doit ajouter des documents/liaisons compensatoires et préserver les originaux.
+
+Les PDF sont conservés dans la base (octets encodés), sans régénération depuis les
+produits, clients ou paramètres courants. Pagination et retours à la ligne
+préservent toutes les lignes. Le moteur actuel supporte Windows-1252, dont les
+accents français ; les caractères hors de cet alphabet, dont l'arabe, provoquent
+un refus avant émission au lieu d'une substitution silencieuse. Un moteur Unicode
+reste nécessaire si les identités officielles le demandent.
+
+Aucun mouvement de stock, créance ou paiement supplémentaire n'est créé par
+l'émission. `document_status=issued` et `payment_status=unavailable` sont séparés :
+FTP-28 doit fournir le vrai règlement, sans déduire « non payé » de l'absence de
+son intégration. FTP-29 reste le producteur manquant des retours clients ; FTP-88
+produit désormais les allocations `invoice` du contrat FTP-87.
+
+Vérification FTP-88 du 10 novembre 2026 : 24 tests / 213 assertions SQLite
+(aperçu, émission, départ réel), 23 tests / 206 assertions MySQL isolé (dont deux
+courses multiprocessus : clés distinctes concurrentes et replay simultané), puis
+revalidation ciblée des 9 tests d'émission MySQL après pagination finale. Pint,
+build React et contrôle du diff réussis. PDF de 100 lignes rendu et inspecté sur
+ses 12 pages : blocs d'articles conservés, en-têtes répétés, dernière ligne et
+total présents. Navigateur : aperçu opérationnel et message d'émission désactivée
+vérifiés ; aucune émission réelle ni recette navigateur d'émission activée n'est
+revendiquée. La validation des règles métier, du contrat commercial réel, des
+retours, du règlement et la revue humaine restent requises avant Done.
+
+### FTP-89 — Vérification de facturation et intégration livraison
+
+Le 10 novembre 2026 : **36 tests / 378 assertions MySQL 8.4 réussis** sur base
+jetable, dont cinq scénarios multiprocessus. **31 tests / 299 assertions SQLite
+réussis**, avec les cinq tests MySQL explicitement ignorés sur SQLite. Pint et
+`git diff --check` réussis ; aucun changement de code applicatif ou de dépendance
+n'a été nécessaire dans cette tranche. L'émission réelle reste désactivée.
+
+`InvoiceDeliveryIntegrationTest` utilise la vraie réservation `WarehouseStock`,
+puis la prise en charge, les scans, la préparation et le départ
+`DeliveryPreparation`. Il vérifie :
+
+- deux départs partiels réellement validés, regroupés en facture quinze jours
+  plus tard, aux prix historiques ;
+- facturation partielle puis solde net après retour avant facture, rejet du
+  dépassement et replay du premier document ;
+- retour enregistré après l'aperçu, rejet de l'émission périmée puis nouvelle
+  prévisualisation limitée au restant ;
+- refus de conditions historiques différentes et de mélange inter-client ;
+- droits effectifs, révocation immédiate de lecture et propriété client ;
+- refus d'update/delete des factures et allocations ; contrôle d'intégrité PDF.
+
+Avant/après émission et replay, les lignes complètes des stocks, réservations,
+mouvements, opérations, BL et commandes sont comparées. L'émission ne crée donc
+pas un second départ, ne consomme pas une autre réservation et ne modifie pas la
+commande dans ces parcours. Les deux départs partiels d'origine restent présents.
+
+`InvoiceIssuanceConcurrencyTest` part désormais de vrais départs et vérifie :
+requêtes concurrentes sur les mêmes quantités, replay simultané, allocations
+partielles concurrentes avec rechargement obligatoire, numéros consécutifs et
+distincts pour deux BL indépendants, et retour commité après le premier snapshot
+MySQL de la facture. Ce dernier test synchronise les processus : le retour tient
+le verrou du BL pendant que la facture commence à lire, puis commit ; la facture
+doit voir le retour sous verrou et répondre 409. Les tests multiprocessus
+invalident ensuite l'état de migration Laravel pour éviter de laisser leurs
+fixtures aux classes transactionnelles suivantes.
+
+**Portée des preuves :** les conditions commerciales confirmées et les retours
+avant facturation sont encore des fixtures du contrat proposé, pas les vrais
+producteurs FTP-22/23/29. Le scénario de concurrence du retour simule explicitement
+ce producteur sous le verrou partagé ; il ne valide pas un processus de retour
+client livré. Le module de créances, paiements et avoirs clients n'est pas présent
+sur cette branche : l'absence de double dette ou de double avantage après crédit
+ne peut pas être déclarée intégrée. Ces preuves financières attendent FTP-28/29,
+avec raccordement réel et revue humaine avant de déclarer FTP-27/89 Done.
+
+Revue avant publication de la branche (10 novembre 2026) : validation calendaire
+des échéances ajoutée, avec test de refus du 31 février et conservation d'un
+29 février valide. Le titre PDF s'adapte aussi à la longueur du numéro pour
+éviter un débordement. Les paramètres d'émission restent désactivés ; cette
+branche apporte un parcours de facturation à intégrer, pas un accord de mise
+en production ni une clôture automatique des tickets Jira.
+
+Contrôles finaux de cette revue : **32 tests / 310 assertions SQLite** et
+**37 tests / 389 assertions MySQL**, dont les cinq scénarios concurrents,
+réussis. Build React, Pint, inspection du PDF et contrôle du diff réussis.

@@ -9,6 +9,9 @@ class AccessPermissionCatalog
 
     /** @var array<string, string> */
     public const LABELS = [
+        'INVOICE_ISSUE' => 'Émettre une facture historique',
+        'INVOICE_READ' => 'Consulter les factures et leurs documents privés',
+        'INVOICE_PREVIEW' => 'Prévisualiser la facturation des BL',
         'CUSTOMER_APPROVE' => 'Review customer registrations and approval decisions',
         'USER_CREATE' => 'Create employee accounts',
         'USER_ASSIGN_ROLE' => 'Assign ordinary roles to employees',
