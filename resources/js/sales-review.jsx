@@ -72,6 +72,12 @@ function SalesReview({ api, catalogue }) {
             <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
+            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
+                detail={detail} api={api} disabled={busy || uncertain} save={values => mutate('quote-drafts', values)} />}
+            <h3>Brouillons de devis conservés</h3>
+            {(detail.quote_drafts ?? []).map(draft => <details key={draft.id}><summary>Brouillon v{draft.revision} — {draft.created_at} UTC — Agent {draft.actor_id}</summary>
+                <QuoteSnapshot snapshot={draft.snapshot} />
+            </details>)}
             {detail.can_manage && detail.status === 'EN_VERIFICATION' && <SalesLinesEditor key={detail.id + '-' + detail.version}
                 detail={detail} api={api} catalogue={catalogue} disabled={busy || uncertain} save={values => mutate('revisions', values)} />}
             {detail.can_manage && detail.status === 'SOUMISE' && <button disabled={busy} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
@@ -108,6 +114,48 @@ function SalesReview({ api, catalogue }) {
                 <p>Avant : {JSON.stringify(revision.before)}</p><p>Proposition : {JSON.stringify(revision.after)}</p><p>Accord client à recueillir.</p>
             </article>)}
         </article>}
+    </section>;
+}
+
+function QuoteSnapshot({ snapshot }) {
+    return <section>
+        <p>Brouillon interne — validité proposée jusqu’au {snapshot.valid_until} (UTC).</p>
+        <p>Contact : {snapshot.contact.name} — {snapshot.contact.email} — {snapshot.contact.phone}</p>
+        <p>Livraison : {[snapshot.delivery_address.address, snapshot.delivery_address.city, snapshot.delivery_address.postal_code, snapshot.delivery_address.country].filter(Boolean).join(', ')}</p>
+        <p>Facturation : {[snapshot.billing_address.address, snapshot.billing_address.city, snapshot.billing_address.postal_code, snapshot.billing_address.country].filter(Boolean).join(', ')}</p>
+        <ul>{snapshot.lines.map(line => <li key={line.id}>{line.sku} — {line.designation} : {line.quantity} × {line.units_per_package}, prix unitaire {line.unit_price} MAD TTC — {line.line_subtotal} MAD TTC</li>)}</ul>
+        <p>Sous-total : {snapshot.estimated_subtotal} MAD TTC. Frais et conditions de paiement à confirmer avant émission.</p>
+    </section>;
+}
+
+function QuoteDraftEditor({ detail, api, disabled, save }) {
+    const [validUntil, setValidUntil] = useState('');
+    const [preview, setPreview] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    async function calculate(event) {
+        event.preventDefault(); setLoading(true); setError(''); setPreview(null);
+        try {
+            const response = await fetch(api + '/' + detail.id + '/quote-preview', { method: 'POST', credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                body: JSON.stringify({ expected_version: detail.version, valid_until: validUntil }) });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(response.status === 409 ? 'La demande a changé. Rouvrez son détail.' : payload.message || 'Prévisualisation indisponible.');
+            setPreview(payload.data);
+        } catch (failure) { setError(failure.message); }
+        finally { setLoading(false); }
+    }
+    return <section aria-label="Brouillon de devis" aria-busy={loading}>
+        <h3>Préparer une version du devis</h3>
+        <p>Le brouillon reprend les dernières propositions enregistrées ci-dessous et recalcule les tarifs client. Chaque version enregistrée est conservée.</p>
+        <form onSubmit={calculate}><fieldset disabled={disabled || loading}>
+            <label>Fin de validité proposée (UTC)<input type="date" required value={validUntil} onChange={event => { setValidUntil(event.target.value); setPreview(null); }} /></label>
+            <button>Prévisualiser le brouillon</button>
+        </fieldset></form>
+        {error && <p role="alert">{error}</p>}
+        {preview && <><QuoteSnapshot snapshot={preview.snapshot} />
+            <button disabled={disabled || loading} onClick={() => save({ expected_version: preview.version, valid_until: preview.snapshot.valid_until,
+                preview_token: preview.preview_token, request_key: crypto.randomUUID() })}>Conserver cette version du brouillon</button></>}
     </section>;
 }
 

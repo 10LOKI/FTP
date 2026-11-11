@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\CustomerOrderResource;
 use App\Models\CustomerProfile;
 use App\Services\SalesOrderReview;
+use App\Services\SalesQuoteDrafts;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,6 +78,12 @@ class SalesReviewController extends Controller
         $data['payment_mode'] = null;
         $data['payment_terms_status'] = 'contract_pending';
         $data['can_manage'] = Gate::allows('ORDER_REVIEW_MANAGE');
+        $data['quote_drafts'] = DB::table('sales_quote_drafts')->where('order_id', $order)->orderBy('revision')
+            ->get(['id', 'revision', 'actor_id', 'order_version', 'snapshot', 'created_at'])->map(function (object $draft): array {
+                return ['id' => $draft->id, 'revision' => (int) $draft->revision, 'actor_id' => (string) $draft->actor_id,
+                    'order_version' => (int) $draft->order_version, 'created_at' => $draft->created_at,
+                    'snapshot' => json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR)];
+            });
         $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
         $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')
             ->get(['id', 'actor_id', 'outcome', 'happened_at', 'note', 'order_version']);
@@ -149,6 +156,22 @@ class SalesReviewController extends Controller
         $values = $request->validate($this->lineRules('lines') + ['expected_version' => ['required', 'integer', 'min:1', 'max:4294967293']]);
 
         return response()->json(['data' => $reviews->previewLines($request->user(), $order, $values['lines'], (int) $values['expected_version'])])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function quoteDraft(Request $request, int $order, SalesQuoteDrafts $drafts): JsonResponse
+    {
+        $this->authorizeReview($request);
+        $save = $request->routeIs('sales.review.quote-drafts');
+        $values = $request->validate([
+            'expected_version' => ['required', 'integer', 'min:1', 'max:4294967293'],
+            'valid_until' => ['required', 'date_format:Y-m-d'],
+            'request_key' => [$save ? 'required' : 'prohibited', 'uuid'],
+            'preview_token' => [$save ? 'required' : 'prohibited', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'lines' => ['prohibited'], 'payment_terms' => ['prohibited'], 'status' => ['prohibited'],
+        ]);
+
+        return response()->json(['data' => $drafts->prepare($request->user(), $order, $values, $save)])
             ->header('Cache-Control', 'private, no-store');
     }
 
