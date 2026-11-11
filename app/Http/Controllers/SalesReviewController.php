@@ -6,6 +6,7 @@ use App\Http\Resources\CustomerOrderResource;
 use App\Models\CustomerProfile;
 use App\Services\SalesOrderReview;
 use App\Services\SalesQuoteDrafts;
+use App\Services\SalesQuotes;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,8 +83,14 @@ class SalesReviewController extends Controller
             ->get(['id', 'revision', 'actor_id', 'order_version', 'snapshot', 'created_at'])->map(function (object $draft): array {
                 return ['id' => $draft->id, 'revision' => (int) $draft->revision, 'actor_id' => (string) $draft->actor_id,
                     'order_version' => (int) $draft->order_version, 'created_at' => $draft->created_at,
-                    'snapshot' => json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR)];
+                    'snapshot' => json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR),
+                    'issuance' => app(SalesQuotes::class)->readiness($draft)];
             });
+        $data['quotes'] = DB::table('sales_quotes')->where('order_id', $order)->orderBy('revision')->get()
+            ->map(fn (object $quote): array => ['id' => $quote->id, 'number' => $quote->number, 'revision' => (int) $quote->revision,
+                'order_version' => (int) $quote->order_version, 'issued_at' => $quote->issued_at, 'valid_until' => $quote->valid_until,
+                'document_url' => route('sales.quotes.document', $quote->id),
+                'decision' => DB::table('sales_quote_decisions')->where('quote_id', $quote->id)->first(['actor_id', 'outcome', 'contact_method', 'contact_name', 'contacted_at'])]);
         $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
         $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')
             ->get(['id', 'actor_id', 'outcome', 'happened_at', 'note', 'order_version']);

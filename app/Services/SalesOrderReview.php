@@ -26,7 +26,7 @@ class SalesOrderReview
             abort_unless($order !== null, 404);
             $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
             abort_unless($review !== null && (int) $review->claimed_by === $actor->id, 403);
-            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === $expectedVersion, 409);
+            abort_unless(in_array($order->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true) && (int) $order->version === $expectedVersion, 409);
 
             return $this->lineProposals->calculate((int) $order->user_id, $lines) + ['version' => (int) $order->version];
         }, 3);
@@ -83,7 +83,7 @@ class SalesOrderReview
 
                 return ['call_id' => $existing->id, 'version' => (int) $existing->order_version, 'replayed' => true];
             }
-            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === $payload['expected_version'], 409, 'État ou version périmés.');
+            abort_unless(in_array($order->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true) && (int) $order->version === $payload['expected_version'], 409, 'État ou version périmés.');
             $id = (string) Str::uuid();
             $version = (int) $order->version + 1;
             DB::table('sales_order_calls')->insert(['id' => $id, 'order_id' => $orderId, 'actor_id' => $actor->id,
@@ -122,7 +122,7 @@ class SalesOrderReview
 
                 return ['revision_id' => $existing->id, 'version' => (int) $existing->order_version, 'requires_agreement' => true, 'replayed' => true];
             }
-            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
+            abort_unless(in_array($order->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true) && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
             $previous = DB::table('sales_order_revisions')->where('order_id', $orderId)->where('kind', $values['kind'])->orderByDesc('order_version')->first();
             if ($values['kind'] === 'lines') {
                 $before = $previous === null ? ['lines' => json_decode($order->lines, true, 512, JSON_THROW_ON_ERROR)]

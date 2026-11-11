@@ -34,6 +34,9 @@ function OrderDetails({ order }) {
             {key === 'delivery_address' ? 'Livraison' : 'Facturation'} : {order[key].address}, {order[key].postal_code} {order[key].city}, {order[key].country}
         </p>)}
         {order.customer_note && <p>Votre note : {order.customer_note}</p>}
+        {(order.quotes ?? []).length > 0 && <section><h3>Vos devis</h3><ul>{order.quotes.map(quote => <li key={quote.id}>
+            <a href={quote.document_url}>{quote.number} — PDF de la version {quote.revision}</a> — valable jusqu’au {quote.valid_until} (UTC)
+        </li>)}</ul></section>}
     </article>;
 }
 

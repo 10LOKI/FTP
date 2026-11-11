@@ -72,16 +72,38 @@ function SalesReview({ api, catalogue }) {
             <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
                 detail={detail} api={api} disabled={busy || uncertain} save={values => mutate('quote-drafts', values)} />}
             <h3>Brouillons de devis conservés</h3>
             {(detail.quote_drafts ?? []).map(draft => <details key={draft.id}><summary>Brouillon v{draft.revision} — {draft.created_at} UTC — Agent {draft.actor_id}</summary>
                 <QuoteSnapshot snapshot={draft.snapshot} />
+                {detail.can_manage && draft.order_version === detail.version && <>
+                    <p>{draft.issuance?.reason}</p>
+                    <button disabled={busy || uncertain || !draft.issuance?.ready} onClick={() => mutate('quotes', { draft_id: draft.id,
+                        expected_version: detail.version, issuance_token: draft.issuance.token, request_key: crypto.randomUUID() })}>Émettre cette version du devis</button>
+                </>}
             </details>)}
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <SalesLinesEditor key={detail.id + '-' + detail.version}
+            <h3>Devis émis</h3>{(detail.quotes ?? []).map(quote => <article key={quote.id}>
+                <h4><a href={quote.document_url}>{quote.number} — Télécharger le PDF conservé</a></h4>
+                <p>Version {quote.revision} — validité jusqu’au {quote.valid_until} (UTC).</p>
+                {quote.decision && <p>{quote.decision.outcome} — {quote.decision.contact_name} — {quote.decision.contact_method} — {quote.decision.contacted_at} UTC — Agent {quote.decision.actor_id}</p>}
+                {detail.can_manage && !quote.decision && detail.status === 'ATTENTE_ACCORD' && quote.order_version === detail.version && <form onSubmit={event => {
+                    event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
+                    values.contacted_at = new Date(values.contacted_at).toISOString();
+                    mutate('quotes/' + quote.id + '/decision', { ...values, expected_version: detail.version, request_key: crypto.randomUUID() });
+                }}><fieldset disabled={busy || uncertain}><legend>Consigner la décision sur {quote.number}</legend>
+                    <label>Décision<select name="outcome"><option value="ACCEPTED">Accord</option><option value="REFUSED">Refus</option></select></label>
+                    <label>Moyen de contact<select name="contact_method"><option value="PHONE">Téléphone</option><option value="EMAIL">E-mail</option><option value="IN_PERSON">En personne</option></select></label>
+                    <label>Interlocuteur<input name="contact_name" required maxLength="160" /></label>
+                    <label>Date du contact<input name="contacted_at" type="datetime-local" required /></label>
+                    <label>Note interne<textarea name="note" maxLength="2000" /></label><button>Enregistrer sur cette version</button>
+                    <p>L’accord ne confirme pas la commande et ne réserve aucun stock.</p>
+                </fieldset></form>}
+            </article>)}
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <SalesLinesEditor key={detail.id + '-' + detail.version}
                 detail={detail} api={api} catalogue={catalogue} disabled={busy || uncertain} save={values => mutate('revisions', values)} />}
             {detail.can_manage && detail.status === 'SOUMISE' && <button disabled={busy} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <form onSubmit={event => {
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <form onSubmit={event => {
                 event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
                 values.happened_at = new Date(values.happened_at).toISOString();
                 mutate('calls', { ...values, order_id: detail.id, expected_version: detail.version, request_key: crypto.randomUUID() });
@@ -90,7 +112,7 @@ function SalesReview({ api, catalogue }) {
                 <label>Date locale de l’appel<input name="happened_at" type="datetime-local" required /></label>
                 <label>Note interne<textarea name="note" maxLength="2000" /></label><button>Enregistrer l’appel</button>
             </fieldset></form>}
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <form key={detail.id + '-' + detail.version + '-' + revisionKind} onSubmit={event => {
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <form key={detail.id + '-' + detail.version + '-' + revisionKind} onSubmit={event => {
                 event.preventDefault(); const fields = new FormData(event.currentTarget);
                 const changes = Object.fromEntries([...fields.entries()].filter(([key]) => key !== 'reason'));
                 mutate('revisions', { kind: revisionKind, changes, reason: fields.get('reason'), expected_version: detail.version, request_key: crypto.randomUUID() });

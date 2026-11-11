@@ -36,7 +36,7 @@ class SalesQuoteDrafts
                     return ['draft_id' => $existing->id, 'revision' => (int) $existing->revision, 'version' => (int) $existing->order_version, 'replayed' => true];
                 }
             }
-            abort_unless($order->status === 'EN_VERIFICATION' && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
+            abort_unless(in_array($order->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true) && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
             abort_unless($values['valid_until'] > now('UTC')->toDateString(), 422, 'La validité doit être future (UTC).');
             $snapshot = $this->snapshot($order, $values['valid_until']);
             $stable = $snapshot;
