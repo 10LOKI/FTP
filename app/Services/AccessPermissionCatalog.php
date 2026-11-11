@@ -9,6 +9,11 @@ class AccessPermissionCatalog
 
     /** @var array<string, string> */
     public const LABELS = [
+        'CUSTOMER_TERMS_MANAGE' => 'Gérer les conditions commerciales futures du client',
+        'PAYMENT_READ' => 'Consulter les soldes et règlements clients',
+        'PAYMENT_RECORD' => 'Enregistrer et affecter les règlements et crédits clients',
+        'PAYMENT_CORRECT' => 'Corriger un règlement avec justification',
+        'PAYMENT_UNBLOCK' => 'Débloquer un impayé régularisé (administrateur protégé)',
         'INVOICE_ISSUE' => 'Émettre une facture historique',
         'INVOICE_READ' => 'Consulter les factures et leurs documents privés',
         'INVOICE_PREVIEW' => 'Prévisualiser la facturation des BL',

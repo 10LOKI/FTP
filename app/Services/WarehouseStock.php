@@ -119,6 +119,10 @@ class WarehouseStock
             $this->version((int) $order->version, $orderVersion);
             abort_unless($order->status === 'CONFIRMEE', 409, 'La réservation exige une confirmation dans la même transaction.');
             abort_unless(CustomerProfile::where('user_id', $order->user_id)->where('approval', 'APPROUVE')->exists(), 409, 'Le compte client doit être approuvé.');
+            if (config('receivables.enabled') === true) {
+                $credit = app(CustomerFinance::class)->creditCheck((int) $order->user_id);
+                abort_unless($credit['allowed'], 409, 'La confirmation est bloquée : '.$credit['reason']);
+            }
             $orderLines = collect(json_decode($order->lines, true, flags: JSON_THROW_ON_ERROR))->keyBy('id');
             $this->lockWarehouses(array_column($lines, 'warehouse_id'));
             $productIds = array_unique(array_column($lines, 'product_id'));

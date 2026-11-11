@@ -184,6 +184,10 @@ class DeliveryPreparation
             $remaining = max(0, $ordered - $consumed);
             DB::table('customer_orders')->where('id', $batch->order_id)->update(['status' => $remaining === 0 ? 'EXPEDIEE' : 'PARTIELLEMENT_EXPEDIEE', 'version' => DB::raw('version + 1'), 'updated_at' => now('UTC')]);
             DB::table('delivery_batches')->where('id', $batch->id)->update(['status' => 'DISPATCHED', 'dispatched_by' => $actor->id, 'dispatched_at' => now('UTC'), 'active_order_id' => null, 'version' => (int) $batch->version + 1, 'updated_at' => now('UTC')]);
+            if (config('receivables.enabled') === true) {
+                $unresolved = app(CustomerFinance::class)->synchronize((int) $order->user_id);
+                abort_unless($unresolved === [], 409, 'Les conditions historiques et échéances doivent être confirmées avant le départ.');
+            }
             $fresh = DB::table('delivery_batches')->where('id', $batch->id)->firstOrFail();
             $document = $this->pdf->render($fresh, $lines);
             DB::table('delivery_batches')->where('id', $batch->id)->update(['document_sha256' => hash('sha256', $document)]);

@@ -833,3 +833,133 @@ en production ni une clôture automatique des tickets Jira.
 Contrôles finaux de cette revue : **32 tests / 310 assertions SQLite** et
 **37 tests / 389 assertions MySQL**, dont les cinq scénarios concurrents,
 réussis. Build React, Pint, inspection du PDF et contrôle du diff réussis.
+
+## Règlements et soldes clients — FTP-28
+
+`/mes-soldes` fournit le suivi React : un client approuvé ne consulte que ses
+propres montants ; un employé avec `PAYMENT_READ` recherche un client et consulte
+ses créances, chèques en attente, crédits, remboursements et opérations. Les
+montants sont en MAD TTC. Les références bancaires, motifs internes et opérations
+d’administration ne sont pas projetés dans l’API client. Les réponses sont privées
+et sans stockage en cache.
+
+`config/receivables.php` conserve **`enabled=false`** et **`reminder_days=null`**.
+Les délais, l’origine métier des échéances et le délai de rappel attendent une
+validation ; aucun nombre de jours ni taux fiscal n’est déduit ou créé. Une date
+calendaire explicite issue des conditions historiques confirmées est nécessaire.
+L’activation de la facturation reste indépendante et désactivée dans `billing.php`.
+
+### API et autorisations
+
+- `GET /api/v1/finance/customers?search=…&page=1` : recherche paginée, `PAYMENT_READ`.
+- `GET /api/v1/finance/customers/{userId}` : état financier interne, `PAYMENT_READ`.
+- `GET /api/v1/me/finance` : propre compte client approuvé, sans historique interne.
+- `POST /api/v1/finance/customers/{userId}/{action}` : commande avec `request_key`
+  UUID. Création : 201 ; même auteur/clé/contenu : 200 et `replayed=true` ; autre
+  contenu ou auteur : 409. Champs étrangers, doublons d’affectation et montants
+  non positifs ou sans deux décimales sont refusés.
+
+Actions et champs additionnels :
+
+| Action | Droit | Champs |
+| --- | --- | --- |
+| `terms` | `CUSTOMER_TERMS_MANAGE` | `version`, `mode`, `label`, `reason` |
+| `payment` | `PAYMENT_RECORD` | `amount`, `mode`, `allocations`; pour un chèque : `reference`, `maturity_date` |
+| `collect` | `PAYMENT_RECORD` | `payment_id`, `reference` réelle d’encaissement |
+| `reverse` | `PAYMENT_CORRECT` | `payment_id`, `reason` |
+| `credit_apply` | `PAYMENT_RECORD` | `credit_id`, `amount`, `allocations`, `reason` |
+| `refund` | `PAYMENT_RECORD` | `credit_id`, `amount`, `reference` du remboursement réalisé, `reason` |
+| `unblock` | `PAYMENT_UNBLOCK` + administrateur protégé utilisable | `version`, `reason` |
+
+`allocations` contient de 1 à 100 objets `{receivable_id, amount}` ; la somme doit
+égaler `amount`. Le formulaire propose une créance par opération ; l’API permet
+plusieurs affectations. Les montants sont des chaînes décimales, par exemple
+`"125.50"`, conservées exactement sans calcul flottant. Le seeder
+`BillingPermissionSeeder` crée les permissions manquantes sans attribuer de rôle.
+Les permissions sont vérifiées réellement côté serveur, y compris pour les clients
+qui auraient reçu accidentellement une permission d’employé.
+
+Une approbation client, lorsque la politique est activée, exige
+`payment_terms: {mode, label}` et le droit de gestion des conditions en plus du
+droit d’approbation. Un seul mode actif est conservé par version : `cash`, `cheque`
+ou `postdated_cheque`. Modifier les conditions ajoute une version et ne réécrit
+pas les documents ou échéances existants.
+
+### Dette, échéances et contrats d’intégration
+
+La créance porte sur chaque ligne de BL réellement partie, à son prix historique
+unitaire MAD TTC et pour les seules pièces livrées. Elle ne dépend pas de la date
+de facturation : établir ou rejouer une facture ne crée pas une seconde dette et
+ne repousse pas l’échéance. La confirmation commerciale doit fournir le contrat
+persisté `customer_orders.commercial_snapshot.billing_v1` déjà proposé par FTP-27,
+avec identité client correspondante, statut confirmé, auteur/date, empreinte des
+lignes, devise/base, et `payment_terms.mode` / `payment_terms.due_date` explicites.
+Les dates invalides ou contrats manquants produisent `complete=false` et un nombre
+de lignes non reconnues ; le solde affiché est alors partiel et les nouveaux
+règlements sont refusés. Aucune API navigateur ne permet de fabriquer ces sources.
+
+Avec activation, le service de départ crée les créances dans la transaction du
+stock ; une source incomplète annule le départ. Le service de réservation appelle
+`CustomerFinance::creditCheck(customerId)` dans sa transaction et bloque les
+nouvelles réservations en cas d’impayé, de blocage conservé ou de conditions
+manquantes. Ce contrat retourne `{allowed, reason}` et doit également être utilisé
+par les futurs parcours de vente qui ne passent pas par cette réservation.
+
+La remise d’un chèque maintient la dette et réserve ses affectations. Seul
+l’encaissement explicite, à partir de son échéance, réduit la dette ; un règlement
+ou un crédit concurrent ne peut pas utiliser les mêmes montants réservés. Une
+correction motivée conserve le règlement d’origine et rétablit son effet une seule
+fois. Les tables de créances, conditions, droits, opérations et rappels interdisent
+update/delete sur SQLite et MySQL ; l’échec de l’audit annule la mutation.
+
+`CustomerFinance::registerCredit(customerId, sourceKey, amount)` est un **port
+interne proposé pour FTP-29**, appelé dans la transaction du vrai retour/correctif.
+Il crée un droit unique par source ; le même droit est consommé soit en affectation,
+soit en remboursement réellement constaté, sous le même verrou client. Aucun
+endpoint ne crée librement un avoir. Le producteur réel des retours, la procédure
+de correction des documents émis et les règles d’utilisation/remboursement restent
+à raccorder et valider. Les droits des tests sont des fixtures de ce port, pas une
+preuve d’un retour client intégré. Un reliquat de livraison ne crée aucun droit.
+
+`php artisan receivables:review` crée les rappels **internes au tableau de suivi**
+uniques avant échéance et conserve les blocages d’impayé ; la tâche est programmée
+chaque jour via le scheduler Laravel. Il faut exécuter le scheduler en exploitation.
+Sans délai de rappel approuvé, aucun rappel anticipé n’est créé. Le paiement seul
+ne débloque pas le compte : seuls un administrateur protégé, une régularisation
+complète, la version courante et un motif permettent le déblocage. Une permission
+d’annulation documentaire ne donne pas ce droit. Aucun email ou SMS n’est envoyé
+par cette fonctionnalité. Les comparaisons calendaires utilisent le fuseau de
+l’application, à confirmer au déploiement.
+
+Le parcours peut être développé et testé sur ces contrats ; il ne vaut pas
+validation des règles ouvertes, intégration définitive FTP-22/23/29 ni clôture de
+FTP-28. Le statut documentaire et le règlement d’une facture restent distincts ;
+le détail des soldes s’appuie ici sur les créances des livraisons, sans réécrire
+les factures historiques ni attribuer arbitrairement un règlement à une facture
+partielle couvrant seulement une partie des mêmes lignes.
+
+Vérification du 11 novembre 2026 : suite SQLite complète **722 tests réussis,
+25 ignorés, 4 895 assertions** ; matrice MySQL isolée **32 tests / 399 assertions**
+(finances, livraison/facturation et neuf scénarios concurrents). Après alignement
+final de la qualification des prix historiques sur FTP-27, revalidation ciblée :
+**23 tests / 265 assertions SQLite**, **20 tests / 234 assertions MySQL** dont les
+quatre courses financières. Build React, Pint et contrôle du diff réussis.
+Navigateur sur base de démonstration jetable : paiement partiel de 100 MAD,
+passage de 627,50 à 527,50 MAD et historique vérifiés. Aucune activation sur la
+base de développement ni preuve du futur producteur réel de retours n’est revendiquée.
+
+Suite de la revue FTP-28 : l’utilisateur confirme que les règles de délai ne sont
+pas encore disponibles et demande de différer leur implémentation jusqu’à leur
+communication. `enabled=false` et `reminder_days=null` restent donc inchangés.
+La consultation des soldes ne synchronise plus de nouvelles créances et ne pose
+aucun nouveau blocage lorsque la politique est désactivée. Les imports directs,
+la création de crédits et les contrôles de crédit respectent aussi cette
+activation ; le suivi interne ne crée aucun rappel en mode désactivé. Les
+créances déjà enregistrées restent consultables et les lignes livrées non
+importées sont signalées comme non reconnues. Aucun délai par défaut n’est ajouté.
+Les tests de cette revue couvrent les consultations employé/client, les appels
+internes et la tâche planifiée : **41 tests / 361 assertions SQLite réussis** ;
+build React, Pint et contrôle du diff réussis.
+Revalidation MySQL de cette revue : **22 tests / 257 assertions réussis**, dont
+les quatre scénarios concurrents de règlement, replay, crédit/remboursement et
+encaissement/correction.
