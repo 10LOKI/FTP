@@ -132,6 +132,13 @@ docker compose exec mysql mysql --version
 docker compose exec ftp uname -m
 ```
 
+La qualification de livraison, la traçabilité REC et les bloqueurs de mise en
+production sont suivis dans
+[`docs/release/FTP-32-acceptance-matrix.md`](docs/release/FTP-32-acceptance-matrix.md).
+La procédure de sauvegarde, restauration isolée et rollback se trouve dans
+[`docs/release/FTP-32-operations-runbook.md`](docs/release/FTP-32-operations-runbook.md).
+Ne jamais restaurer une sauvegarde sur une base active.
+
 Les tests existants peuvent être exécutés sans utiliser la base de développement.
 Les variables de test sont explicites car celles du conteneur priment sur les
 valeurs par défaut de `phpunit.xml` :
