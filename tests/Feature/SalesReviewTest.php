@@ -49,7 +49,7 @@ class SalesReviewTest extends TestCase
             ->assertJsonCount(1, 'data')->assertJsonPath('data.0.number', 'CMD-ONE');
         $response = $this->getJson('/api/v1/sales/orders/'.$id)->assertOk()
             ->assertJsonPath('data.customer.customer_code', 'CLI-ONE')
-            ->assertJsonPath('data.payment_terms_status', 'contract_pending')
+            ->assertJsonPath('data.payment_terms_status', 'policy_disabled')
             ->assertHeader('Cache-Control', 'no-store, private');
         $this->assertStringNotContainsString('PRIVATE-MARKER', $response->getContent());
         $role->permissions()->detach();

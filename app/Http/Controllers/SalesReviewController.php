@@ -76,11 +76,12 @@ class SalesReviewController extends Controller
         $data = (new CustomerOrderResource($row))->resolve($request);
         $data['customer'] = Arr::only(json_decode($row->customer_snapshot, true, 512, JSON_THROW_ON_ERROR),
             ['id', 'customer_code', 'type', 'company_name']);
-        $data['payment_mode'] = null;
-        $data['payment_terms_status'] = 'contract_pending';
+        $paymentTerms = DB::table('customer_payment_terms')->where('customer_id', $row->user_id)->orderByDesc('version')->first(['mode', 'label']);
+        $data['payment_mode'] = $paymentTerms?->mode;
+        $data['payment_terms_status'] = config('receivables.enabled') !== true ? 'policy_disabled' : ($paymentTerms === null ? 'terms_required' : 'available');
         $data['can_manage'] = Gate::allows('ORDER_REVIEW_MANAGE');
         $data['quote_drafts'] = DB::table('sales_quote_drafts')->where('order_id', $order)->orderBy('revision')
-            ->get(['id', 'revision', 'actor_id', 'order_version', 'snapshot', 'created_at'])->map(function (object $draft): array {
+            ->get(['id', 'order_id', 'revision', 'actor_id', 'order_version', 'snapshot', 'created_at'])->map(function (object $draft): array {
                 return ['id' => $draft->id, 'revision' => (int) $draft->revision, 'actor_id' => (string) $draft->actor_id,
                     'order_version' => (int) $draft->order_version, 'created_at' => $draft->created_at,
                     'snapshot' => json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR),
@@ -176,6 +177,8 @@ class SalesReviewController extends Controller
         $values = $request->validate([
             'expected_version' => ['required', 'integer', 'min:1', 'max:4294967293'],
             'valid_until' => ['required', 'date_format:Y-m-d'],
+            'payment_due_date' => ['nullable', 'date_format:Y-m-d'],
+            'fees' => ['nullable', 'string', Rule::in(['0.00'])],
             'request_key' => [$save ? 'required' : 'prohibited', 'uuid'],
             'preview_token' => [$save ? 'required' : 'prohibited', 'string', 'regex:/^[a-f0-9]{64}$/'],
             'lines' => ['prohibited'], 'payment_terms' => ['prohibited'], 'status' => ['prohibited'],

@@ -8,6 +8,7 @@ use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\QuoteNotificationSender;
+use App\Services\QuotePaymentTerms;
 use App\Services\SalesQuotes;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -43,6 +44,10 @@ class QuoteNotificationTest extends TestCase
             $role->permissions()->attach(Permission::firstOrCreate(['code' => $code], ['module' => 'sales', 'label' => $code]));
         }
         $actor->roles()->attach($role, ['assigned_by' => $actor->id, 'assigned_at' => now()]);
+        config(['receivables.enabled' => true]);
+        DB::table('customer_finance_accounts')->insert(['customer_id' => $customer->user_id, 'version' => 1, 'blocked' => false]);
+        DB::table('customer_payment_terms')->insert(['id' => (string) Str::uuid(), 'customer_id' => $customer->user_id, 'version' => 1,
+            'mode' => 'cash', 'label' => 'Conditions fictives', 'recorded_by' => $actor->id, 'reason' => 'Fixture', 'created_at' => now('UTC')]);
         $id = DB::table('customer_orders')->insertGetId(['user_id' => $customer->user_id, 'number' => 'CMD-'.Str::ulid(),
             'status' => 'EN_VERIFICATION', 'version' => 1, 'idempotency_key' => (string) Str::uuid(), 'request_hash' => str_repeat('a', 64),
             'customer_snapshot' => '{}', 'contact' => '{}', 'delivery_address' => '{}', 'billing_address' => '{}',
@@ -55,6 +60,7 @@ class QuoteNotificationTest extends TestCase
             'fees' => '0.00', 'currency' => 'MAD', 'tax_basis' => 'TTC', 'valid_until' => now('UTC')->addWeek()->toDateString(),
             'estimated_subtotal' => '200.00', 'lines' => [['sku' => 'TEST-1', 'designation' => 'Test', 'original_reference' => 'TEST',
                 'quantity' => 2, 'units_per_package' => 1, 'unit_price' => '100.00', 'line_subtotal' => '200.00']]];
+        $snapshot = array_replace($snapshot, DB::transaction(fn (): array => app(QuotePaymentTerms::class)->capture($customer->user_id, now('UTC')->addWeek()->toDateString())));
         DB::table('sales_quote_drafts')->insert(['id' => $draftId, 'order_id' => $id, 'actor_id' => $actor->id, 'revision' => 1, 'order_version' => 1,
             'request_key' => (string) Str::uuid(), 'request_hash' => str_repeat('b', 64), 'snapshot' => json_encode($snapshot), 'created_at' => now('UTC')]);
         $record = DB::table('sales_quote_drafts')->where('id', $draftId)->first();

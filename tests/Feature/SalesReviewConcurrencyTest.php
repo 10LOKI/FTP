@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\QuoteNotificationSender;
+use App\Services\QuotePaymentTerms;
 use App\Services\SalesOrderReview;
 use App\Services\SalesQuoteDrafts;
 use App\Services\SalesQuotes;
@@ -188,8 +189,12 @@ class SalesReviewConcurrencyTest extends TestCase
         [$id, $actor, $values] = $this->quoteScenario();
         $draft = app(SalesQuoteDrafts::class)->prepare(User::findOrFail($actor), $id, $values, true)['draft_id'];
         $snapshot = json_decode(DB::table('sales_quote_drafts')->where('id', $draft)->value('snapshot'), true);
-        $snapshot['payment_terms_status'] = 'ready';
-        $snapshot['payment_terms'] = ['mode' => 'test', 'label' => 'Conditions fictives'];
+        $customerId = (int) DB::table('customer_orders')->where('id', $id)->value('user_id');
+        config(['receivables.enabled' => true]);
+        DB::table('customer_finance_accounts')->insert(['customer_id' => $customerId, 'version' => 1, 'blocked' => false]);
+        DB::table('customer_payment_terms')->insert(['id' => (string) Str::uuid(), 'customer_id' => $customerId, 'version' => 1,
+            'mode' => 'cash', 'label' => 'Conditions fictives', 'recorded_by' => $actor, 'reason' => 'Fixture', 'created_at' => now('UTC')]);
+        $snapshot = array_replace($snapshot, DB::transaction(fn (): array => app(QuotePaymentTerms::class)->capture($customerId, now('UTC')->addWeek()->toDateString())));
         $snapshot['fees'] = '0.00';
         $snapshot['contact'] = ['name' => 'Client fictif'];
         $snapshot['billing_address'] = ['address' => 'Rabat'];

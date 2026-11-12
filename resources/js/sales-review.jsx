@@ -69,7 +69,9 @@ function SalesReview({ api, catalogue }) {
         {detail && <article><h2>{detail.number}</h2>
             <p>{detail.customer.customer_code} — {detail.customer.type} — {detail.status} — Version {detail.version}</p>
             <p>Contact : {detail.contact.name} — {detail.contact.phone}</p>
-            <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
+            <p>Mode de paiement du compte : {({ cash: 'Espèces', cheque: 'Chèque', postdated_cheque: 'Chèque postdaté' })[detail.payment_mode] ?? 'à définir par le responsable'}.
+                {detail.payment_terms_status === 'policy_disabled' && <> La politique de paiement est désactivée.</>}
+            </p>
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
             {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
@@ -151,24 +153,32 @@ function QuoteSnapshot({ snapshot }) {
         <p>Livraison : {[snapshot.delivery_address.address, snapshot.delivery_address.city, snapshot.delivery_address.postal_code, snapshot.delivery_address.country].filter(Boolean).join(', ')}</p>
         <p>Facturation : {[snapshot.billing_address.address, snapshot.billing_address.city, snapshot.billing_address.postal_code, snapshot.billing_address.country].filter(Boolean).join(', ')}</p>
         <ul>{snapshot.lines.map(line => <li key={line.id}>{line.sku} — {line.designation} : {line.quantity} × {line.units_per_package}, prix unitaire {line.unit_price} MAD TTC — {line.line_subtotal} MAD TTC</li>)}</ul>
-        <p>Sous-total : {snapshot.estimated_subtotal} MAD TTC. Frais et conditions de paiement à confirmer avant émission.</p>
+        <p>Sous-total : {snapshot.estimated_subtotal} MAD TTC. Frais : {snapshot.fees === null ? 'à confirmer' : snapshot.fees + ' MAD TTC'}.</p>
+        <p>Conditions de paiement : {snapshot.payment_terms?.label ?? 'à définir sur le compte'}.
+            {snapshot.payment_terms && <> Version du compte {snapshot.payment_terms.version} — échéance proposée : {snapshot.payment_terms.due_date ?? 'à préciser'} (UTC).</>}
+            {snapshot.payment_terms_status !== 'ready' && <> Conditions incomplètes ou politique désactivée ; émission bloquée.</>}
+        </p>
     </section>;
 }
 
 function QuoteDraftEditor({ detail, api, disabled, save }) {
     const [validUntil, setValidUntil] = useState('');
+    const [dueDate, setDueDate] = useState('');
+    const [fees, setFees] = useState('');
     const [preview, setPreview] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     async function calculate(event) {
         event.preventDefault(); setLoading(true); setError(''); setPreview(null);
         try {
+            const requested = { expected_version: detail.version, valid_until: validUntil,
+                ...(dueDate ? { payment_due_date: dueDate } : {}), ...(fees ? { fees } : {}) };
             const response = await fetch(api + '/' + detail.id + '/quote-preview', { method: 'POST', credentials: 'same-origin',
                 headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
-                body: JSON.stringify({ expected_version: detail.version, valid_until: validUntil }) });
+                body: JSON.stringify(requested) });
             const payload = await response.json();
             if (!response.ok) throw new Error(response.status === 409 ? 'La demande a changé. Rouvrez son détail.' : payload.message || 'Prévisualisation indisponible.');
-            setPreview(payload.data);
+            setPreview({ ...payload.data, requested });
         } catch (failure) { setError(failure.message); }
         finally { setLoading(false); }
     }
@@ -177,11 +187,16 @@ function QuoteDraftEditor({ detail, api, disabled, save }) {
         <p>Le brouillon reprend les dernières propositions enregistrées ci-dessous et recalcule les tarifs client. Chaque version enregistrée est conservée.</p>
         <form onSubmit={calculate}><fieldset disabled={disabled || loading}>
             <label>Fin de validité proposée (UTC)<input type="date" required value={validUntil} onChange={event => { setValidUntil(event.target.value); setPreview(null); }} /></label>
+            <label>Échéance de paiement proposée (UTC)<input type="date" value={dueDate} onChange={event => { setDueDate(event.target.value); setPreview(null); }} /></label>
+            <label>Frais du devis<select value={fees} onChange={event => { setFees(event.target.value); setPreview(null); }}>
+                <option value="">À confirmer</option><option value="0.00">Confirmer l’absence de frais</option>
+            </select></label>
+            <p>Le mode provient du compte client ; aucun délai ni mode n’est choisi automatiquement. Les frais non nuls attendent leur contrat de totalisation.</p>
             <button>Prévisualiser le brouillon</button>
         </fieldset></form>
         {error && <p role="alert">{error}</p>}
         {preview && <><QuoteSnapshot snapshot={preview.snapshot} />
-            <button disabled={disabled || loading} onClick={() => save({ expected_version: preview.version, valid_until: preview.snapshot.valid_until,
+            <button disabled={disabled || loading} onClick={() => save({ ...preview.requested,
                 preview_token: preview.preview_token, request_key: crypto.randomUUID() })}>Conserver cette version du brouillon</button></>}
     </section>;
 }

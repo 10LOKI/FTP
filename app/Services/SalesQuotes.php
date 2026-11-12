@@ -21,6 +21,9 @@ class SalesQuotes
             $snapshot = json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR);
             $context = $this->context->resolve($snapshot);
 
+            $customerId = (int) DB::table('customer_orders')->where('id', $draft->order_id)->value('user_id');
+            app(QuotePaymentTerms::class)->assertCurrent($customerId, $snapshot, false);
+
             return ['ready' => true, 'token' => hash('sha256', json_encode([$snapshot, $context], JSON_THROW_ON_ERROR)), 'reason' => null];
         } catch (HttpExceptionInterface $exception) {
             return ['ready' => false, 'token' => null, 'reason' => $exception->getMessage()];
@@ -64,6 +67,7 @@ class SalesQuotes
             $snapshot = json_decode($draft->snapshot, true, flags: JSON_THROW_ON_ERROR);
             abort_unless($snapshot['valid_until'] >= now('UTC')->toDateString(), 409, 'Brouillon expiré.');
             $context = $this->context->resolve($snapshot);
+            app(QuotePaymentTerms::class)->assertCurrent((int) $order->user_id, $snapshot);
             $ready = $this->readiness($draft);
             abort_unless($ready['ready'] && hash_equals($ready['token'], $input['issuance_token']), 409, 'Conditions documentaires modifiées.');
             $id = (string) Str::uuid();

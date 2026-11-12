@@ -8,6 +8,7 @@ use App\Models\Permission;
 use App\Models\Product;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\QuotePaymentTerms;
 use App\Services\QuotePdf;
 use App\Services\SalesQuotes;
 use Illuminate\Database\QueryException;
@@ -50,11 +51,14 @@ class SalesQuoteTest extends TestCase
         $preview = $this->postJson("/api/v1/sales/orders/$order/quote-preview", $values)->assertOk()->json('data');
         $draft = $this->postJson("/api/v1/sales/orders/$order/quote-drafts", $values + ['request_key' => (string) Str::uuid(), 'preview_token' => $preview['preview_token']])->assertOk()->json('data.draft_id');
         if ($readyFixture) {
+            config(['receivables.enabled' => true]);
+            DB::table('customer_finance_accounts')->insert(['customer_id' => $customer->user_id, 'version' => 1, 'blocked' => false]);
+            DB::table('customer_payment_terms')->insert(['id' => (string) Str::uuid(), 'customer_id' => $customer->user_id, 'version' => 1,
+                'mode' => 'cash', 'label' => 'Conditions fictives de test', 'recorded_by' => $actor->id, 'reason' => 'Fixture', 'created_at' => now('UTC')]);
             config(['quotes.issuance_enabled' => true, 'quotes.policy_version' => 'TEST-ONLY', 'quotes.number_prefix' => 'DEV-TEST-',
                 'quotes.seller' => ['name' => 'Vendeur fictif', 'address' => 'Adresse de test'], 'quotes.tax_note' => 'Politique fictive de test TTC']);
             $snapshot = $preview['snapshot'];
-            $snapshot['payment_terms_status'] = 'ready';
-            $snapshot['payment_terms'] = ['mode' => 'test', 'label' => 'Conditions fictives de test'];
+            $snapshot = array_replace($snapshot, app(QuotePaymentTerms::class)->capture($customer->user_id, now('UTC')->addWeek()->toDateString()));
             $snapshot['fees'] = '0.00';
             DB::table('sales_quote_drafts')->where('id', $draft)->update(['snapshot' => json_encode($snapshot)]);
         }

@@ -27,7 +27,11 @@ class SalesQuoteDrafts
             abort_unless($order !== null, 404);
             $review = DB::table('sales_order_reviews')->where('order_id', $orderId)->first();
             abort_unless($review !== null && (int) $review->claimed_by === $actor->id, 403);
-            $hash = hash('sha256', json_encode([(int) $values['expected_version'], $values['valid_until'], $values['preview_token'] ?? null], JSON_THROW_ON_ERROR));
+            $identity = [(int) $values['expected_version'], $values['valid_until'], $values['preview_token'] ?? null];
+            if (isset($values['payment_due_date']) || isset($values['fees'])) {
+                $identity[] = ['payment_due_date' => $values['payment_due_date'] ?? null, 'fees' => $values['fees'] ?? null];
+            }
+            $hash = hash('sha256', json_encode($identity, JSON_THROW_ON_ERROR));
             if ($save) {
                 $existing = DB::table('sales_quote_drafts')->where('order_id', $orderId)->where('request_key', Str::lower($values['request_key']))->first();
                 if ($existing !== null) {
@@ -39,6 +43,8 @@ class SalesQuoteDrafts
             abort_unless(in_array($order->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true) && (int) $order->version === (int) $values['expected_version'], 409, 'État ou version périmés.');
             abort_unless($values['valid_until'] > now('UTC')->toDateString(), 422, 'La validité doit être future (UTC).');
             $snapshot = $this->snapshot($order, $values['valid_until']);
+            $snapshot = array_replace($snapshot, app(QuotePaymentTerms::class)->capture((int) $order->user_id, $values['payment_due_date'] ?? null),
+                ['fees' => $values['fees'] ?? null]);
             $stable = $snapshot;
             foreach ($stable['lines'] as &$line) {
                 unset($line['pricing']['calculated_at']);
