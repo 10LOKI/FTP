@@ -90,6 +90,9 @@ class SalesReviewController extends Controller
             ->map(fn (object $quote): array => ['id' => $quote->id, 'number' => $quote->number, 'revision' => (int) $quote->revision,
                 'order_version' => (int) $quote->order_version, 'issued_at' => $quote->issued_at, 'valid_until' => $quote->valid_until,
                 'document_url' => route('sales.quotes.document', $quote->id),
+                'notification' => DB::table('sales_quote_notifications')->where('quote_id', $quote->id)
+                    ->first(['status', 'attempts', 'next_attempt_at', 'sent_at', 'last_error_code']),
+                'notification_enabled' => config('quotes.notifications_enabled') === true,
                 'decision' => DB::table('sales_quote_decisions')->where('quote_id', $quote->id)->first(['actor_id', 'outcome', 'contact_method', 'contact_name', 'contacted_at'])]);
         $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
         $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')

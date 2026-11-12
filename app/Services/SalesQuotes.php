@@ -81,7 +81,8 @@ class SalesQuotes
                 'request_hash' => $hash, 'snapshot' => json_encode($snapshot, JSON_THROW_ON_ERROR), 'document_base64' => base64_encode($document),
                 'document_sha256' => hash('sha256', $document), 'valid_until' => $snapshot['valid_until'], 'issued_at' => $at]);
             DB::table('customer_orders')->where('id', $orderId)->update(['status' => 'ATTENTE_ACCORD', 'version' => $version, 'updated_at' => now()]);
-            $this->audit($actor, $id, 'sales.quote_issued');
+            $event = $this->audit($actor, $id, 'sales.quote_issued');
+            app(QuoteNotificationSender::class)->enqueue($order, $id, $event);
 
             return ['quote_id' => $id, 'version' => $version, 'replayed' => false];
         }, 3);
@@ -164,9 +165,9 @@ class SalesQuotes
         }, 3);
     }
 
-    private function audit(User $actor, string $quoteId, string $action): void
+    private function audit(User $actor, string $quoteId, string $action): AuditEvent
     {
-        AuditEvent::create(['actor_id' => $actor->id, 'request_id' => (string) Str::uuid(), 'action' => $action,
+        return AuditEvent::create(['actor_id' => $actor->id, 'request_id' => (string) Str::uuid(), 'action' => $action,
             'object_type' => 'sales_quote', 'object_id' => $quoteId, 'result' => 'SUCCESS', 'occurred_at' => now('UTC')]);
     }
 }

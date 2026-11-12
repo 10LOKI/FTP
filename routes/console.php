@@ -14,6 +14,8 @@ Schedule::command('employees:send-access')->everyMinute()->withoutOverlapping();
 
 Schedule::command('notifications:deliver')->everyMinute()->withoutOverlapping();
 
+Schedule::command('quotes:deliver-notifications')->everyMinute()->withoutOverlapping();
+
 Schedule::command('accounts:suspend-inactive')->everyMinute()->withoutOverlapping();
 
 Schedule::command('receivables:review')->daily()->withoutOverlapping();

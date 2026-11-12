@@ -86,6 +86,11 @@ function SalesReview({ api, catalogue }) {
             <h3>Devis émis</h3>{(detail.quotes ?? []).map(quote => <article key={quote.id}>
                 <h4><a href={quote.document_url}>{quote.number} — Télécharger le PDF conservé</a></h4>
                 <p>Version {quote.revision} — validité jusqu’au {quote.valid_until} (UTC).</p>
+                {quote.notification && <p>Notification : {({ PENDING: 'en attente', RETRY: 'à réessayer', SENT: 'acceptée par le transport', EXPIRED: 'offre non courante, envoi arrêté' })[quote.notification.status]}.
+                    {' '}{quote.notification.attempts} tentative(s).
+                    {quote.notification.next_attempt_at && <> Prochaine tentative : {quote.notification.next_attempt_at} UTC.</>}
+                    {!quote.notification_enabled && <> Les envois sont désactivés ; la demande de notification est conservée.</>}
+                </p>}
                 {quote.decision && <p>{quote.decision.outcome} — {quote.decision.contact_name} — {quote.decision.contact_method} — {quote.decision.contacted_at} UTC — Agent {quote.decision.actor_id}</p>}
                 {detail.can_manage && !quote.decision && detail.status === 'ATTENTE_ACCORD' && quote.order_version === detail.version && <form onSubmit={event => {
                     event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));

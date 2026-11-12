@@ -7,6 +7,7 @@ use App\Models\Permission;
 use App\Models\Product;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\QuoteNotificationSender;
 use App\Services\SalesOrderReview;
 use App\Services\SalesQuoteDrafts;
 use App\Services\SalesQuotes;
@@ -165,6 +166,22 @@ class SalesReviewConcurrencyTest extends TestCase
         $this->assertDatabaseCount('stock_operations', 0);
     }
 
+    public function test_concurrent_quote_notification_records_one_transport_acceptance(): void
+    {
+        [$id, $actor, $input] = $this->issuanceScenario();
+        config(['quotes.notifications_enabled' => true]);
+        $quote = app(SalesQuotes::class)->issue(User::findOrFail($actor), $id, $input)['quote_id'];
+        $intent = DB::table('sales_quote_notifications')->where('quote_id', $quote)->first();
+        $task = ['actor' => $actor, 'method' => 'notifyQuote', 'values' => ['intent_id' => $intent->id]];
+        $results = $this->parallel($id, [$task, $task]);
+        $this->assertSame([200, 200], array_column($results, 'status'));
+        $sent = array_column(array_column($results, 'data'), 'sent');
+        sort($sent);
+        $this->assertSame([false, true], $sent);
+        $this->assertDatabaseHas('sales_quote_notifications', ['id' => $intent->id, 'status' => 'SENT', 'attempts' => 1]);
+        $this->assertSame(1, DB::table('audit_events')->where('action', 'sales.quote_notification')->where('result', 'SUCCESS')->count());
+    }
+
     /** @return array{int, int, array<string, mixed>} */
     private function issuanceScenario(): array
     {
@@ -220,7 +237,9 @@ class SalesReviewConcurrencyTest extends TestCase
                 fread($pair[1], 1);
                 try {
                     $actor = User::findOrFail($task['actor']);
-                    if ($task['method'] === 'issueQuote') {
+                    if ($task['method'] === 'notifyQuote') {
+                        $data = ['sent' => app(QuoteNotificationSender::class)->send($task['values']['intent_id'])];
+                    } elseif ($task['method'] === 'issueQuote') {
                         $data = app(SalesQuotes::class)->issue($actor, $id, $task['values']);
                     } elseif ($task['method'] === 'decideQuote') {
                         $data = app(SalesQuotes::class)->decide($actor, $id, $task['values']['quote_id'], $task['values']);
