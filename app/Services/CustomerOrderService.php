@@ -39,6 +39,11 @@ class CustomerOrderService
                 return ['order' => $existing, 'replayed' => true];
             }
 
+            if (config('receivables.enabled') === true) {
+                $credit = app(CustomerFinance::class)->creditCheck($userId);
+                abort_unless($credit['allowed'], 409, 'La nouvelle commande est bloquée : '.$credit['reason']);
+            }
+
             $cart = $this->carts->snapshot($userId);
             abort_unless($cart['version'] === $canonical['expected_version'], 409, 'Le panier a changé. Vérifiez-le à nouveau.');
             abort_unless($cart['lines'] !== [] && $cart['pricing_status'] === 'customer_estimate'
