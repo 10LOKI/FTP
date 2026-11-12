@@ -70,6 +70,10 @@ class SalesOrderReviewTest extends TestCase
         $this->assertDatabaseHas('sales_order_calls', ['actor_id' => $actor->id, 'order_version' => 3]);
         $this->assertDatabaseHas('customer_orders', ['id' => $id, 'status' => 'EN_VERIFICATION', 'version' => 3]);
         $this->getJson("/api/v1/sales/orders/$id")->assertOk()->assertJsonCount(1, 'data.calls');
+        $audit = DB::table('audit_events')->where('action', 'sales.call_recorded')->first();
+        $this->assertNotNull($audit);
+        $this->assertSame(['after' => ['version' => 3]], json_decode($audit->changes, true));
+        $this->assertStringNotContainsString('Appel de test', json_encode($audit));
     }
 
     public function test_read_permission_does_not_grant_write_and_other_agents_cannot_take_over(): void
@@ -99,6 +103,29 @@ class SalesOrderReviewTest extends TestCase
         $this->postJson("/api/v1/sales/orders/$id/calls", array_replace($payload, ['outcome' => 'INVALID']))->assertUnprocessable();
         $this->postJson("/api/v1/sales/orders/$id/calls", $payload + ['actor_id' => 999])->assertUnprocessable();
         $this->assertDatabaseHas('customer_orders', ['id' => $id, 'version' => 2]);
+        $this->assertDatabaseCount('sales_order_calls', 0);
+    }
+
+    public function test_detail_capabilities_follow_ownership_state_and_permission_revocation(): void
+    {
+        $id = $this->order();
+        $owner = $this->actor();
+        $this->getJson("/api/v1/sales/orders/$id")->assertOk()
+            ->assertJsonPath('data.can_claim', true)->assertJsonPath('data.can_manage', false);
+        $this->postJson("/api/v1/sales/orders/$id/claim", ['expected_version' => 1])->assertOk();
+        $this->getJson("/api/v1/sales/orders/$id")->assertOk()
+            ->assertJsonPath('data.can_claim', false)->assertJsonPath('data.can_manage', true);
+        $this->actor();
+        $this->getJson("/api/v1/sales/orders/$id")->assertOk()
+            ->assertJsonPath('data.can_claim', false)->assertJsonPath('data.can_manage', false);
+        $this->actingAs($owner);
+        DB::table('customer_orders')->where('id', $id)->update(['status' => 'CONFIRMEE']);
+        $this->getJson("/api/v1/sales/orders/$id")->assertOk()->assertJsonPath('data.can_manage', false);
+        DB::table('customer_orders')->where('id', $id)->update(['status' => 'EN_VERIFICATION']);
+        $owner->roles()->first()->permissions()->detach(Permission::where('code', 'ORDER_REVIEW_MANAGE')->value('id'));
+        $this->getJson("/api/v1/sales/orders/$id")->assertOk()->assertJsonPath('data.can_manage', false);
+        $this->postJson("/api/v1/sales/orders/$id/calls", ['expected_version' => 2, 'request_key' => (string) Str::uuid(),
+            'outcome' => 'JOINED', 'happened_at' => now('UTC')->subMinute()->toIso8601String()])->assertForbidden();
         $this->assertDatabaseCount('sales_order_calls', 0);
     }
 }

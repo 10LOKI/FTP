@@ -1004,3 +1004,58 @@ Matrice MySQL isolée finale : **50 tests / 615 assertions réussis**, dont sept
 scénarios concurrents de commande et de finance. Les tests utilisant un worker
 Laravel distinct ont été lancés avec les variables de la base jetable également
 exportées dans l’environnement du processus, et pas seulement dans PHPUnit.
+
+### FTP-21 — Revue commerciale et journal des contacts
+
+Dans `/gestion/commandes`, filtrer par numéro exact, code client, état et dates
+de soumission inclusives en UTC, puis ouvrir une demande. La lecture exige
+`ORDER_REVIEW` ; les comptes clients sont exclus même avec cette permission.
+La pagination contient 20 demandes. Le détail affiche le code et le type client,
+le dernier mode enregistré par FTP-28 et sa version, sans réécrire les conditions.
+Sans conditions, le responsable habilité doit les définir. La politique financière
+désactivée est signalée et reste inchangée ; aucun mode ni délai n’est inventé.
+
+Avec `ORDER_REVIEW_MANAGE`, prendre en charge une demande `SOUMISE` libre.
+Elle passe à `EN_VERIFICATION` ; l’auteur et l’heure sont conservés. Seul cet
+agent peut ajouter des appels et proposer des révisions en `EN_VERIFICATION`
+ou `ATTENTE_ACCORD`. Les autres agents conservent une consultation seule.
+Un conflit exige de rouvrir le détail ; après un résultat réseau incertain,
+« Réessayer la même opération » conserve la demande et sa clé de reprise.
+
+Routes de session sous `/api/v1/sales/orders`, cache privé `no-store`, CSRF
+requis pour les POST :
+
+- `GET ?number=CMD-…&customer_code=CLI-…&status=SOUMISE&from=2026-11-10&to=2026-11-12&page=1`
+  et `GET /{id}` : file et détail ; `can_claim` / `can_manage` reflètent les
+  droits, l’attribution et l’état courants, revérifiés sur chaque écriture.
+- `POST /{id}/claim` : `{ "expected_version": 1 }`.
+- `POST /{id}/calls` : `{ "expected_version": 2, "request_key": "UUID",
+  "outcome": "JOINED", "happened_at": "2026-11-10T12:00:00Z", "note": "…" }`.
+  Résultats autorisés : `JOINED`, `UNREACHABLE`, `CALLBACK_REQUESTED`, `AGREEMENT`,
+  `REFUSED`. L’auteur vient de la session ; les dates futures sont refusées.
+- `POST /{id}/revisions` : `expected_version`, `request_key`, `reason`, `kind`
+  (`contact`, `delivery_address`, `billing_address`, `lines`) et `changes`.
+  Les champs acceptés suivent le formulaire. Pour les lignes, obtenir d’abord
+  un `pricing_token` avec `POST /{id}/line-preview` et les seules valeurs
+  `product_id`, `quantity`, `units_per_package`. Prix et remises proviennent
+  du vrai moteur client, en MAD TTC ; le navigateur ne fixe aucun prix.
+
+Chaque appel et proposition est attribué, versionné et conservé avec son
+historique. Les instantanés soumis restent inchangés. Une substitution exige
+un accord explicite sur le devis versionné (FTP-22) : ni la proposition ni un
+appel `AGREEMENT` ne valent acceptation d’une offre. Aucun de ces actes ne
+confirme la commande, ne réserve du stock et ne crée de sortie physique.
+Version périmée ou clé réutilisée avec un autre contenu : 409 ; autre agent
+ou permission absente : 403 ; saisie invalide : 422. L’audit général contient
+la version, sans recopier notes de contact, motifs financiers ou secrets.
+
+Pour une recette jetable, `SalesReviewDemoSeeder` refuse toute base autre que
+`ftp_cart_tests` et tout environnement hors `local` / `testing`. Après migration
+de cette base isolée, lancer `php artisan db:seed --class=SalesReviewDemoSeeder
+--no-interaction` avec `DB_DATABASE=ftp_cart_tests`. Le seeder réutilise la vraie
+soumission de panier et prépare trois comptes fictifs `ftp21-agent@example.test`,
+`ftp21-other-agent@example.test`, `ftp21-reader@example.test` (mot de passe de
+test commun `ftp21-isolated-demo-only`). Les conditions de paiement sont des
+fixtures, sans approbation métier ; leur intégration réelle est couverte par
+`SalesReviewTest` avec le service FTP-28. Ne jamais pointer le serveur de recette
+sur la base applicative ; l’application habituelle et ses données sont conservées.

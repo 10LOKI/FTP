@@ -26,7 +26,16 @@ function SalesReview({ api, catalogue }) {
                 return;
             }
             pendingOperation.current = null; setUncertain(false);
-            await open(orderId);
+            try {
+                const [updatedDetail, updatedOrders] = await Promise.all([
+                    read(api + '/' + orderId),
+                    read(api + '?' + new URLSearchParams({ ...filters, page: orders?.current_page ?? 1 })),
+                ]);
+                setDetail(updatedDetail.data); setOrders(updatedOrders);
+            } catch {
+                setDetail(null); setOrders(null);
+                setError('Action enregistrée. Le rafraîchissement a échoué : rechargez la liste avec « Filtrer » avant de continuer.');
+            }
         } catch (failure) { setUncertain(true); setError(failure.message); }
         finally { setBusy(false); }
     }
@@ -69,7 +78,11 @@ function SalesReview({ api, catalogue }) {
         {detail && <article><h2>{detail.number}</h2>
             <p>{detail.customer.customer_code} — {detail.customer.type} — {detail.status} — Version {detail.version}</p>
             <p>Contact : {detail.contact.name} — {detail.contact.phone}</p>
-            <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
+            <p>Mode de paiement du compte : {({ cash: 'Espèces', cheque: 'Chèque', postdated_cheque: 'Chèque à échéance' })[detail.payment_mode] ?? 'À définir par le responsable habilité'}
+                {detail.payment_terms_version != null && <> — conditions v{detail.payment_terms_version}</>}. Lecture seule.</p>
+            {!detail.payment_policy_enabled && <p>La politique de règlement reste désactivée. La revue ne l’active pas.</p>}
+            {detail.review && <p>Prise en charge : agent {detail.review.claimed_by} — {detail.review.claimed_at} UTC.
+                {!detail.can_manage && ' Consultation seule : les actions exigent l’agent chargé, ses droits et un état de revue ouvert.'}</p>}
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
             {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
@@ -102,7 +115,7 @@ function SalesReview({ api, catalogue }) {
             </article>)}
             {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <SalesLinesEditor key={detail.id + '-' + detail.version}
                 detail={detail} api={api} catalogue={catalogue} disabled={busy || uncertain} save={values => mutate('revisions', values)} />}
-            {detail.can_manage && detail.status === 'SOUMISE' && <button disabled={busy} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
+            {detail.can_claim && <button disabled={busy || uncertain} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
             {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <form onSubmit={event => {
                 event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
                 values.happened_at = new Date(values.happened_at).toISOString();

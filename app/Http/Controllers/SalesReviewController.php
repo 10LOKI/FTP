@@ -76,9 +76,16 @@ class SalesReviewController extends Controller
         $data = (new CustomerOrderResource($row))->resolve($request);
         $data['customer'] = Arr::only(json_decode($row->customer_snapshot, true, 512, JSON_THROW_ON_ERROR),
             ['id', 'customer_code', 'type', 'company_name']);
-        $data['payment_mode'] = null;
-        $data['payment_terms_status'] = 'contract_pending';
-        $data['can_manage'] = Gate::allows('ORDER_REVIEW_MANAGE');
+        $terms = DB::table('customer_payment_terms')->where('customer_id', $row->user_id)->orderByDesc('version')->first(['mode', 'version']);
+        $data['payment_mode'] = $terms?->mode;
+        $data['payment_terms_version'] = $terms === null ? null : (int) $terms->version;
+        $data['payment_terms_status'] = $terms === null ? 'terms_required' : 'available';
+        $data['payment_policy_enabled'] = config('receivables.enabled') === true;
+        $review = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
+        $canManage = Gate::allows('ORDER_REVIEW_MANAGE');
+        $data['can_claim'] = $canManage && $review === null && $row->status === 'SOUMISE';
+        $data['can_manage'] = $canManage && $review !== null && (int) $review->claimed_by === (int) $request->user()->id
+            && in_array($row->status, ['EN_VERIFICATION', 'ATTENTE_ACCORD'], true);
         $data['quote_drafts'] = DB::table('sales_quote_drafts')->where('order_id', $order)->orderBy('revision')
             ->get(['id', 'revision', 'actor_id', 'order_version', 'snapshot', 'created_at'])->map(function (object $draft): array {
                 return ['id' => $draft->id, 'revision' => (int) $draft->revision, 'actor_id' => (string) $draft->actor_id,
@@ -91,7 +98,7 @@ class SalesReviewController extends Controller
                 'order_version' => (int) $quote->order_version, 'issued_at' => $quote->issued_at, 'valid_until' => $quote->valid_until,
                 'document_url' => route('sales.quotes.document', $quote->id),
                 'decision' => DB::table('sales_quote_decisions')->where('quote_id', $quote->id)->first(['actor_id', 'outcome', 'contact_method', 'contact_name', 'contacted_at'])]);
-        $data['review'] = DB::table('sales_order_reviews')->where('order_id', $order)->first(['claimed_by', 'claimed_at']);
+        $data['review'] = $review;
         $data['calls'] = DB::table('sales_order_calls')->where('order_id', $order)->orderBy('created_at')->orderBy('id')
             ->get(['id', 'actor_id', 'outcome', 'happened_at', 'note', 'order_version']);
         $data['revisions'] = DB::table('sales_order_revisions')->where('order_id', $order)->orderBy('order_version')
