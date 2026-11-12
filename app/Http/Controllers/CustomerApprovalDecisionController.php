@@ -8,9 +8,11 @@ use App\Models\ApprovalNotification;
 use App\Models\AuditEvent;
 use App\Models\CustomerProfile;
 use App\Models\IssuedCustomerCode;
+use App\Services\CustomerFinance;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 
 class CustomerApprovalDecisionController extends Controller
 {
@@ -37,6 +39,14 @@ class CustomerApprovalDecisionController extends Controller
                 $profile->decision_reason = $data['reason'];
                 $profile->version++;
                 $profile->save();
+                if ($data['decision'] === 'APPROUVE' && isset($data['payment_terms'])) {
+                    $finance = app(CustomerFinance::class);
+                    $account = $finance->lock((int) $profile->user_id);
+                    $finance->operate($request->user(), (int) $profile->user_id, 'terms', [
+                        'request_key' => (string) Str::uuid(), 'version' => (int) $account->version,
+                        'mode' => $data['payment_terms']['mode'], 'label' => $data['payment_terms']['label'], 'reason' => $data['reason'],
+                    ]);
+                }
 
                 $approvalEvent = AuditEvent::create([
                     'actor_id' => $request->user()->getAuthIdentifier(),

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\CartController;
+use App\Http\Controllers\CustomerFinanceController;
 use App\Http\Controllers\CustomerOrderController;
 use App\Http\Controllers\CustomerPricingController;
 use App\Http\Controllers\CustomerSessionController;
@@ -144,4 +145,13 @@ Route::middleware(['auth', EnsureCustomerApproved::class, 'throttle:customer-com
     Route::post('/api/v1/billing/invoices', [InvoiceController::class, 'store'])->name('invoices.store');
     Route::get('/api/v1/invoices/{invoice}', [InvoiceController::class, 'show'])->whereUuid('invoice')->name('invoices.show');
     Route::get('/api/v1/invoices/{invoice}/document', [InvoiceController::class, 'document'])->whereUuid('invoice')->name('invoices.document');
+});
+
+Route::middleware(['auth', EnsureCustomerApproved::class, 'throttle:customer-commerce'])->group(function (): void {
+    Route::get('/mes-soldes', [CustomerFinanceController::class, 'page'])->name('finance.page');
+    Route::get('/api/v1/me/finance', [CustomerFinanceController::class, 'show'])->name('finance.own');
+    Route::get('/api/v1/finance/customers', [CustomerFinanceController::class, 'customers'])->name('finance.customers');
+    Route::get('/api/v1/finance/customers/{customer}', [CustomerFinanceController::class, 'show'])->whereNumber('customer')->name('finance.show');
+    Route::post('/api/v1/finance/customers/{customer}/{action}', [CustomerFinanceController::class, 'mutate'])
+        ->whereNumber('customer')->whereIn('action', ['terms', 'payment', 'collect', 'reverse', 'credit_apply', 'refund', 'unblock'])->name('finance.mutate');
 });
