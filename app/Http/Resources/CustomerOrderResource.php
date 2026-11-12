@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 class CustomerOrderResource extends JsonResource
 {
@@ -16,6 +17,11 @@ class CustomerOrderResource extends JsonResource
         return [
             'id' => (string) $order->id, 'number' => $order->number, 'version' => (int) $order->version,
             'status' => $order->status, 'submitted_at' => $order->created_at,
+            'quotes' => $this->when($request->routeIs('customer.orders.show'), fn () => DB::table('sales_quotes')->where('order_id', $order->id)
+                ->orderBy('revision')->get(['id', 'number', 'revision', 'issued_at', 'valid_until'])->map(fn (object $quote): array => [
+                    'id' => $quote->id, 'number' => $quote->number, 'revision' => (int) $quote->revision, 'issued_at' => $quote->issued_at,
+                    'valid_until' => $quote->valid_until, 'document_url' => route('sales.quotes.document', $quote->id),
+                ])),
             'contact' => Arr::only(json_decode($order->contact, true, 512, JSON_THROW_ON_ERROR), ['name', 'email', 'phone']),
             'delivery_address' => Arr::only(json_decode($order->delivery_address, true, 512, JSON_THROW_ON_ERROR), ['address', 'city', 'postal_code', 'country']),
             'billing_address' => Arr::only(json_decode($order->billing_address, true, 512, JSON_THROW_ON_ERROR), ['address', 'city', 'postal_code', 'country']),

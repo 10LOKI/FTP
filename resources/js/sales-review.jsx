@@ -72,10 +72,38 @@ function SalesReview({ api, catalogue }) {
             <p>Mode de paiement : contrat de conditions client en attente d’intégration.</p>
             <ul>{detail.lines.map(line => <li key={line.id}>{line.designation} — {line.quantity} × {line.units_per_package} unité(s), prix historique {line.unit_price}</li>)}</ul>
             <p>Les montants historiques et leur base fiscale restent ceux de la soumission. Aucune conversion ou modification automatique.</p>
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <SalesLinesEditor key={detail.id + '-' + detail.version}
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <QuoteDraftEditor key={'quote-' + detail.id + '-' + detail.version}
+                detail={detail} api={api} disabled={busy || uncertain} save={values => mutate('quote-drafts', values)} />}
+            <h3>Brouillons de devis conservés</h3>
+            {(detail.quote_drafts ?? []).map(draft => <details key={draft.id}><summary>Brouillon v{draft.revision} — {draft.created_at} UTC — Agent {draft.actor_id}</summary>
+                <QuoteSnapshot snapshot={draft.snapshot} />
+                {detail.can_manage && draft.order_version === detail.version && <>
+                    <p>{draft.issuance?.reason}</p>
+                    <button disabled={busy || uncertain || !draft.issuance?.ready} onClick={() => mutate('quotes', { draft_id: draft.id,
+                        expected_version: detail.version, issuance_token: draft.issuance.token, request_key: crypto.randomUUID() })}>Émettre cette version du devis</button>
+                </>}
+            </details>)}
+            <h3>Devis émis</h3>{(detail.quotes ?? []).map(quote => <article key={quote.id}>
+                <h4><a href={quote.document_url}>{quote.number} — Télécharger le PDF conservé</a></h4>
+                <p>Version {quote.revision} — validité jusqu’au {quote.valid_until} (UTC).</p>
+                {quote.decision && <p>{quote.decision.outcome} — {quote.decision.contact_name} — {quote.decision.contact_method} — {quote.decision.contacted_at} UTC — Agent {quote.decision.actor_id}</p>}
+                {detail.can_manage && !quote.decision && detail.status === 'ATTENTE_ACCORD' && quote.order_version === detail.version && <form onSubmit={event => {
+                    event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
+                    values.contacted_at = new Date(values.contacted_at).toISOString();
+                    mutate('quotes/' + quote.id + '/decision', { ...values, expected_version: detail.version, request_key: crypto.randomUUID() });
+                }}><fieldset disabled={busy || uncertain}><legend>Consigner la décision sur {quote.number}</legend>
+                    <label>Décision<select name="outcome"><option value="ACCEPTED">Accord</option><option value="REFUSED">Refus</option></select></label>
+                    <label>Moyen de contact<select name="contact_method"><option value="PHONE">Téléphone</option><option value="EMAIL">E-mail</option><option value="IN_PERSON">En personne</option></select></label>
+                    <label>Interlocuteur<input name="contact_name" required maxLength="160" /></label>
+                    <label>Date du contact<input name="contacted_at" type="datetime-local" required /></label>
+                    <label>Note interne<textarea name="note" maxLength="2000" /></label><button>Enregistrer sur cette version</button>
+                    <p>L’accord ne confirme pas la commande et ne réserve aucun stock.</p>
+                </fieldset></form>}
+            </article>)}
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <SalesLinesEditor key={detail.id + '-' + detail.version}
                 detail={detail} api={api} catalogue={catalogue} disabled={busy || uncertain} save={values => mutate('revisions', values)} />}
             {detail.can_manage && detail.status === 'SOUMISE' && <button disabled={busy} onClick={() => mutate('claim', { expected_version: detail.version })}>Prendre en charge</button>}
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <form onSubmit={event => {
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <form onSubmit={event => {
                 event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
                 values.happened_at = new Date(values.happened_at).toISOString();
                 mutate('calls', { ...values, order_id: detail.id, expected_version: detail.version, request_key: crypto.randomUUID() });
@@ -84,7 +112,7 @@ function SalesReview({ api, catalogue }) {
                 <label>Date locale de l’appel<input name="happened_at" type="datetime-local" required /></label>
                 <label>Note interne<textarea name="note" maxLength="2000" /></label><button>Enregistrer l’appel</button>
             </fieldset></form>}
-            {detail.can_manage && detail.status === 'EN_VERIFICATION' && <form key={detail.id + '-' + detail.version + '-' + revisionKind} onSubmit={event => {
+            {detail.can_manage && ['EN_VERIFICATION', 'ATTENTE_ACCORD'].includes(detail.status) && <form key={detail.id + '-' + detail.version + '-' + revisionKind} onSubmit={event => {
                 event.preventDefault(); const fields = new FormData(event.currentTarget);
                 const changes = Object.fromEntries([...fields.entries()].filter(([key]) => key !== 'reason'));
                 mutate('revisions', { kind: revisionKind, changes, reason: fields.get('reason'), expected_version: detail.version, request_key: crypto.randomUUID() });
@@ -108,6 +136,48 @@ function SalesReview({ api, catalogue }) {
                 <p>Avant : {JSON.stringify(revision.before)}</p><p>Proposition : {JSON.stringify(revision.after)}</p><p>Accord client à recueillir.</p>
             </article>)}
         </article>}
+    </section>;
+}
+
+function QuoteSnapshot({ snapshot }) {
+    return <section>
+        <p>Brouillon interne — validité proposée jusqu’au {snapshot.valid_until} (UTC).</p>
+        <p>Contact : {snapshot.contact.name} — {snapshot.contact.email} — {snapshot.contact.phone}</p>
+        <p>Livraison : {[snapshot.delivery_address.address, snapshot.delivery_address.city, snapshot.delivery_address.postal_code, snapshot.delivery_address.country].filter(Boolean).join(', ')}</p>
+        <p>Facturation : {[snapshot.billing_address.address, snapshot.billing_address.city, snapshot.billing_address.postal_code, snapshot.billing_address.country].filter(Boolean).join(', ')}</p>
+        <ul>{snapshot.lines.map(line => <li key={line.id}>{line.sku} — {line.designation} : {line.quantity} × {line.units_per_package}, prix unitaire {line.unit_price} MAD TTC — {line.line_subtotal} MAD TTC</li>)}</ul>
+        <p>Sous-total : {snapshot.estimated_subtotal} MAD TTC. Frais et conditions de paiement à confirmer avant émission.</p>
+    </section>;
+}
+
+function QuoteDraftEditor({ detail, api, disabled, save }) {
+    const [validUntil, setValidUntil] = useState('');
+    const [preview, setPreview] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    async function calculate(event) {
+        event.preventDefault(); setLoading(true); setError(''); setPreview(null);
+        try {
+            const response = await fetch(api + '/' + detail.id + '/quote-preview', { method: 'POST', credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                body: JSON.stringify({ expected_version: detail.version, valid_until: validUntil }) });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(response.status === 409 ? 'La demande a changé. Rouvrez son détail.' : payload.message || 'Prévisualisation indisponible.');
+            setPreview(payload.data);
+        } catch (failure) { setError(failure.message); }
+        finally { setLoading(false); }
+    }
+    return <section aria-label="Brouillon de devis" aria-busy={loading}>
+        <h3>Préparer une version du devis</h3>
+        <p>Le brouillon reprend les dernières propositions enregistrées ci-dessous et recalcule les tarifs client. Chaque version enregistrée est conservée.</p>
+        <form onSubmit={calculate}><fieldset disabled={disabled || loading}>
+            <label>Fin de validité proposée (UTC)<input type="date" required value={validUntil} onChange={event => { setValidUntil(event.target.value); setPreview(null); }} /></label>
+            <button>Prévisualiser le brouillon</button>
+        </fieldset></form>
+        {error && <p role="alert">{error}</p>}
+        {preview && <><QuoteSnapshot snapshot={preview.snapshot} />
+            <button disabled={disabled || loading} onClick={() => save({ expected_version: preview.version, valid_until: preview.snapshot.valid_until,
+                preview_token: preview.preview_token, request_key: crypto.randomUUID() })}>Conserver cette version du brouillon</button></>}
     </section>;
 }
 

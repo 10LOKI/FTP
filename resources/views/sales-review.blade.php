@@ -5,7 +5,7 @@
 @endpush
 @section('content')
     <h1>Revue commerciale des commandes</h1>
-    <p>Consultation uniquement : aucun stock ni aucune condition de paiement ne sont modifiés.</p>
+    <p>Revue des demandes et préparation des propositions commerciales. Les brouillons restent en attente de validation.</p>
     <div id="sales-review" data-api="{{ route('sales.review.index') }}" data-catalogue="{{ route('public.products.index') }}"></div>
     <noscript>Activez JavaScript pour consulter la file commerciale.</noscript>
 @endsection

@@ -16,6 +16,7 @@ use App\Http\Controllers\EmployeeProvisioningController;
 use App\Http\Controllers\RoleCatalogController;
 use App\Http\Controllers\RoleDeletionController;
 use App\Http\Controllers\RoleEditorController;
+use App\Http\Controllers\SalesQuoteController;
 use App\Http\Controllers\SalesReviewController;
 use App\Http\Middleware\AuditCartRequest;
 use App\Http\Middleware\AuditCustomerApprovalDecision;
@@ -33,7 +34,14 @@ Route::prefix('v1/sales/orders')->middleware(['auth:sanctum', EnsureCustomerAppr
     Route::post('/{order}/calls', [SalesReviewController::class, 'recordCall'])->whereNumber('order')->name('sales.review.calls');
     Route::post('/{order}/revisions', [SalesReviewController::class, 'proposeRevision'])->whereNumber('order')->name('sales.review.revisions');
     Route::post('/{order}/line-preview', [SalesReviewController::class, 'previewLines'])->whereNumber('order')->name('sales.review.line-preview');
+    Route::post('/{order}/quote-preview', [SalesReviewController::class, 'quoteDraft'])->whereNumber('order')->name('sales.review.quote-preview');
+    Route::post('/{order}/quote-drafts', [SalesReviewController::class, 'quoteDraft'])->whereNumber('order')->name('sales.review.quote-drafts');
+    Route::post('/{order}/quotes', [SalesQuoteController::class, 'store'])->whereNumber('order')->name('sales.quotes.store');
+    Route::post('/{order}/quotes/{quote}/decision', [SalesQuoteController::class, 'decide'])->whereNumber('order')->whereUuid('quote')->name('sales.quotes.decide');
 });
+
+Route::get('/v1/quotes/{quote}/document', [SalesQuoteController::class, 'document'])->whereUuid('quote')
+    ->middleware(['auth:sanctum', EnsureCustomerApproved::class, 'throttle:customer-commerce'])->name('sales.quotes.document');
 
 Route::prefix('v1/me/orders')->middleware(['throttle:customer-commerce', AuditCustomerOrderRequest::class, 'auth:sanctum', EnsureCustomerApproved::class])->group(function (): void {
     Route::get('/', [CustomerOrderController::class, 'index'])->name('customer.orders.index');
