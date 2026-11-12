@@ -43,6 +43,11 @@ class QuoteNotificationSender
                 || ($intent->next_attempt_at !== null && CarbonImmutable::parse($intent->next_attempt_at, 'UTC')->isFuture())) {
                 return false;
             }
+            if ((json_decode($quote->snapshot, true, flags: JSON_THROW_ON_ERROR)['demo_mode'] ?? false) === true) {
+                $this->record($intent, ['status' => 'EXPIRED', 'next_attempt_at' => null, 'last_error_code' => 'DEMO_DOCUMENT'], 'REFUSED');
+
+                return false;
+            }
             $current = $quote->valid_until >= now('UTC')->toDateString() && $order->status === 'ATTENTE_ACCORD'
                 && (int) $order->version === (int) $quote->order_version
                 && ! DB::table('sales_quote_decisions')->where('quote_id', $quote->id)->exists();

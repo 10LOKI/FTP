@@ -87,8 +87,9 @@ function SalesReview({ api, catalogue }) {
             </details>)}
             <h3>Devis émis</h3>{(detail.quotes ?? []).map(quote => <article key={quote.id}>
                 <h4><a href={quote.document_url}>{quote.number} — Télécharger le PDF conservé</a></h4>
+                {quote.demo_mode && <p role="status">DÉMONSTRATION — données vendeur fictives, sans valeur commerciale.</p>}
                 <p>Version {quote.revision} — validité jusqu’au {quote.valid_until} (UTC).</p>
-                {quote.notification && <p>Notification : {({ PENDING: 'en attente', RETRY: 'à réessayer', SENT: 'acceptée par le transport', EXPIRED: 'offre non courante, envoi arrêté' })[quote.notification.status]}.
+                {quote.notification && <p>Notification : {quote.demo_mode ? 'aucun envoi pour un document de démonstration' : ({ PENDING: 'en attente', RETRY: 'à réessayer', SENT: 'acceptée par le transport', EXPIRED: 'offre non courante, envoi arrêté' })[quote.notification.status]}.
                     {' '}{quote.notification.attempts} tentative(s).
                     {quote.notification.next_attempt_at && <> Prochaine tentative : {quote.notification.next_attempt_at} UTC.</>}
                     {!quote.notification_enabled && <> Les envois sont désactivés ; la demande de notification est conservée.</>}

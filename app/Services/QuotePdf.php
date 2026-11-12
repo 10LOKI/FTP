@@ -66,6 +66,9 @@ class QuotePdf
             $kids[] = $pageNumber.' 0 R';
             $objects[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '.$streamNumber.' 0 R >>';
             $commands = "0.07 0.14 0.24 rg\n40 752 515 60 re f\n1 1 1 rg\nBT /F2 {$headingSize} Tf 55 782 Td (DEVIS ".$this->escape($snapshot['number']).") Tj ET\n";
+            if (($snapshot['demo_mode'] ?? false) === true) {
+                $commands .= "0.65 0.12 0.05 rg\nBT /F2 8 Tf 40 823 Td (DEMONSTRATION - DONNEES FICTIVES - SANS VALEUR COMMERCIALE) Tj ET\n1 1 1 rg\n";
+            }
             $commands .= 'BT /F1 9 Tf 55 764 Td (Emission UTC : '.$this->escape($snapshot['issued_at']).") Tj ET\n0.08 0.12 0.19 rg\nBT /F1 10 Tf 40 728 Td\n";
             foreach ($page as $rowIndex => $row) {
                 if ($rowIndex > 0) {

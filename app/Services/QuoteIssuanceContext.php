@@ -9,8 +9,13 @@ class QuoteIssuanceContext
      */
     public function resolve(array $snapshot): array
     {
-        abort_unless(config('quotes.issuance_enabled') === true, 503, 'Émission des devis désactivée : règles documentaires à approuver.');
         $policy = config('quotes');
+        $demo = ($policy['demo_mode'] ?? false) === true;
+        if ($demo) {
+            abort_unless(app()->environment('local', 'testing'), 503, 'Le vendeur fictif est réservé aux environnements local et de test.');
+            $policy = array_replace($policy, $policy['demo'], ['issuance_enabled' => true]);
+        }
+        abort_unless($policy['issuance_enabled'] === true, 503, 'Émission des devis désactivée : règles documentaires à approuver.');
         foreach (['policy_version', 'number_prefix', 'tax_note'] as $field) {
             abort_unless(is_string($policy[$field] ?? null) && trim($policy[$field]) !== '', 503, 'La politique des devis est incomplète.');
         }
@@ -26,7 +31,7 @@ class QuoteIssuanceContext
             && is_string($snapshot['fees'] ?? null) && preg_match('/\A[0-9]+\.[0-9]{2}\z/', $snapshot['fees']) === 1, 409, 'Montants ou frais non validés.');
         abort_unless($snapshot['fees'] === '0.00', 409, 'Les frais non nuls nécessitent leur contrat de totalisation.');
 
-        return ['policy_version' => $policy['policy_version'], 'number_prefix' => $policy['number_prefix'],
+        return ['demo_mode' => $demo, 'policy_version' => $policy['policy_version'], 'number_prefix' => $policy['number_prefix'],
             'seller' => $policy['seller'], 'tax_note' => $policy['tax_note']];
     }
 }

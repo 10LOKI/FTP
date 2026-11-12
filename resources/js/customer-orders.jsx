@@ -36,6 +36,7 @@ function OrderDetails({ order }) {
         {order.customer_note && <p>Votre note : {order.customer_note}</p>}
         {(order.quotes ?? []).length > 0 && <section><h3>Vos devis</h3><ul>{order.quotes.map(quote => <li key={quote.id}>
             <a href={quote.document_url}>{quote.number} — PDF de la version {quote.revision}</a> — valable jusqu’au {quote.valid_until} (UTC)
+            {quote.demo_mode && <> — DÉMONSTRATION : données fictives, sans valeur commerciale.</>}
         </li>)}</ul></section>}
     </article>;
 }

@@ -89,6 +89,7 @@ class SalesReviewController extends Controller
             });
         $data['quotes'] = DB::table('sales_quotes')->where('order_id', $order)->orderBy('revision')->get()
             ->map(fn (object $quote): array => ['id' => $quote->id, 'number' => $quote->number, 'revision' => (int) $quote->revision,
+                'demo_mode' => (bool) (json_decode($quote->snapshot, true, flags: JSON_THROW_ON_ERROR)['demo_mode'] ?? false),
                 'order_version' => (int) $quote->order_version, 'issued_at' => $quote->issued_at, 'valid_until' => $quote->valid_until,
                 'document_url' => route('sales.quotes.document', $quote->id),
                 'notification' => DB::table('sales_quote_notifications')->where('quote_id', $quote->id)

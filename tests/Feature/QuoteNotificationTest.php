@@ -214,6 +214,15 @@ class QuoteNotificationTest extends TestCase
         $this->assertCount(0, $transport->messages());
     }
 
+    public function test_demo_documents_are_never_sent_even_if_notifications_are_enabled(): void
+    {
+        config(['quotes.demo_mode' => true]);
+        [, , , , $intent] = $this->issued();
+        $this->assertFalse(app(QuoteNotificationSender::class)->send($intent->id));
+        $this->assertDatabaseHas('sales_quote_notifications', ['id' => $intent->id, 'status' => 'EXPIRED', 'attempts' => 0, 'last_error_code' => 'DEMO_DOCUMENT']);
+        $this->assertCount(0, $this->transport()->messages());
+    }
+
     public function test_command_rejects_invalid_batch_limits(): void
     {
         $this->artisan('quotes:deliver-notifications', ['--limit' => 0])->assertExitCode(2);

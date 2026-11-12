@@ -8,10 +8,13 @@ use App\Models\Product;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\CustomerFinance;
+use App\Services\QuoteIssuanceContext;
+use App\Services\QuotePdf;
 use App\Services\SalesQuotes;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Tests\TestCase;
 
 class QuotePaymentTermsTest extends TestCase
@@ -142,6 +145,63 @@ class QuotePaymentTermsTest extends TestCase
         $this->postJson("/api/v1/sales/orders/$order/quote-drafts", $this->payload($order, 5))->assertOk();
         $this->getJson("/api/v1/sales/orders/$order")->assertOk()->assertJsonPath('data.quote_drafts.1.snapshot.payment_terms.mode', 'cheque');
         $this->assertDatabaseCount('stock_operations', 0);
+    }
+
+    public function test_demo_seller_is_frozen_and_all_pdf_pages_remain_labelled_after_mode_changes(): void
+    {
+        config(['quotes.demo_mode' => true, 'quotes.issuance_enabled' => false, 'quotes.seller' => ['name' => null, 'address' => null],
+            'quotes.number_prefix' => null, 'quotes.policy_version' => null, 'quotes.tax_note' => null]);
+        [$order, $actor, $customer] = $this->scenario();
+        $this->terms($actor, $customer);
+        $draft = $this->postJson("/api/v1/sales/orders/$order/quote-drafts", $this->payload($order))->assertOk()->json('data.draft_id');
+        $detail = $this->getJson("/api/v1/sales/orders/$order")->assertOk()->json('data.quote_drafts.0');
+        $id = $this->postJson("/api/v1/sales/orders/$order/quotes", ['draft_id' => $draft, 'expected_version' => 3,
+            'request_key' => (string) Str::uuid(), 'issuance_token' => $detail['issuance']['token']])->assertOk()->json('data.quote_id');
+        $snapshot = json_decode(DB::table('sales_quotes')->where('id', $id)->value('snapshot'), true);
+        $this->assertTrue($snapshot['demo_mode']);
+        $this->assertStringStartsWith('DEMO-', $snapshot['number']);
+        $this->assertSame('FTP DEMO - Societe fictive', $snapshot['seller']['name']);
+        $this->assertSame('DEMO-ICE-NON-VALIDE', $snapshot['seller']['ice']);
+        $pdf = $this->get("/api/v1/quotes/$id/document")->assertOk()->getContent();
+        $this->assertStringContainsString('DEMONSTRATION - DONNEES FICTIVES - SANS VALEUR COMMERCIALE', $pdf);
+        config(['quotes.demo_mode' => false]);
+        $this->get("/api/v1/quotes/$id/document")->assertOk()->assertContent($pdf);
+        $this->getJson("/api/v1/sales/orders/$order")->assertOk()->assertJsonPath('data.quotes.0.demo_mode', true);
+        $this->actingAs($customer->user)->getJson("/api/v1/me/orders/$order")->assertOk()->assertJsonPath('data.quotes.0.demo_mode', true);
+        $snapshot['lines'] = array_fill(0, 45, array_replace($snapshot['lines'][0], ['designation' => str_repeat('Piece de demonstration ', 10)]));
+        $snapshot['estimated_subtotal'] = '9000.00';
+        $document = app(QuotePdf::class)->render($snapshot);
+        $pages = substr_count($document, '/Type /Page ');
+        $this->assertGreaterThan(1, $pages);
+        $this->assertSame($pages, substr_count($document, 'DEMONSTRATION - DONNEES FICTIVES - SANS VALEUR COMMERCIALE'));
+        if (env('FTP_DEMO_PDF_REVIEW_PATH')) {
+            file_put_contents(env('FTP_DEMO_PDF_REVIEW_PATH'), $document);
+        }
+    }
+
+    public function test_demo_seller_is_rejected_outside_local_and_testing(): void
+    {
+        config(['quotes.demo_mode' => true]);
+        $this->app->detectEnvironment(fn (): string => 'production');
+        try {
+            app(QuoteIssuanceContext::class)->resolve([]);
+            $this->fail('Demo seller must be refused outside local/testing.');
+        } catch (HttpExceptionInterface $exception) {
+            $this->assertSame(503, $exception->getStatusCode());
+        }
+    }
+
+    public function test_turning_demo_off_requires_the_official_configuration_before_new_issuance(): void
+    {
+        config(['quotes.demo_mode' => true, 'quotes.issuance_enabled' => false, 'quotes.seller' => ['name' => null, 'address' => null]]);
+        [$order, $actor, $customer] = $this->scenario();
+        $this->terms($actor, $customer);
+        $draft = $this->postJson("/api/v1/sales/orders/$order/quote-drafts", $this->payload($order))->assertOk()->json('data.draft_id');
+        $detail = $this->getJson("/api/v1/sales/orders/$order")->assertOk()->json('data.quote_drafts.0');
+        config(['quotes.demo_mode' => false]);
+        $this->postJson("/api/v1/sales/orders/$order/quotes", ['draft_id' => $draft, 'expected_version' => 3,
+            'request_key' => (string) Str::uuid(), 'issuance_token' => $detail['issuance']['token']])->assertStatus(503);
+        $this->assertDatabaseCount('sales_quotes', 0);
     }
 
     public function test_customer_restriction_after_preview_prevents_issuance(): void

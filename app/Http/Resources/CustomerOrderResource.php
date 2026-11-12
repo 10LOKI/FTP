@@ -18,8 +18,9 @@ class CustomerOrderResource extends JsonResource
             'id' => (string) $order->id, 'number' => $order->number, 'version' => (int) $order->version,
             'status' => $order->status, 'submitted_at' => $order->created_at,
             'quotes' => $this->when($request->routeIs('customer.orders.show'), fn () => DB::table('sales_quotes')->where('order_id', $order->id)
-                ->orderBy('revision')->get(['id', 'number', 'revision', 'issued_at', 'valid_until'])->map(fn (object $quote): array => [
+                ->orderBy('revision')->get(['id', 'number', 'revision', 'issued_at', 'valid_until', 'snapshot'])->map(fn (object $quote): array => [
                     'id' => $quote->id, 'number' => $quote->number, 'revision' => (int) $quote->revision, 'issued_at' => $quote->issued_at,
+                    'demo_mode' => (bool) (json_decode($quote->snapshot, true, flags: JSON_THROW_ON_ERROR)['demo_mode'] ?? false),
                     'valid_until' => $quote->valid_until, 'document_url' => route('sales.quotes.document', $quote->id),
                 ])),
             'contact' => Arr::only(json_decode($order->contact, true, 512, JSON_THROW_ON_ERROR), ['name', 'email', 'phone']),
